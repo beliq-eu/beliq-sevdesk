@@ -7,6 +7,7 @@ import {
 } from '@beliq/sdk'
 import { flagBool, flagStr, type ParsedArgs } from './args.js'
 import { ConfigError } from './errors.js'
+import type { NotifyOn } from './notify.js'
 
 /** sevDesk default REST base. Endpoints hang off /Invoice, /Invoice/{id}/getXml. */
 export const DEFAULT_SEVDESK_BASE_URL = 'https://api.sevdesk.de/api/v1'
@@ -37,6 +38,10 @@ export interface Config {
   once: boolean
   /** Walk the full pipeline (real API calls) but write no files and persist no state. */
   dryRun: boolean
+  /** Webhook to POST the poll report to; undefined disables notifications. */
+  notifyWebhook?: string
+  /** When to notify: only when something failed, or after every poll. */
+  notifyOn: NotifyOn
 }
 
 /** Read a non-empty trimmed value; flag wins over env. */
@@ -88,6 +93,26 @@ function resolveProfile(raw: string | undefined): FacturxProfile | undefined {
   return raw as FacturxProfile
 }
 
+function resolveNotifyWebhook(raw: string | undefined): string | undefined {
+  if (!raw) return undefined
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    throw new ConfigError(`invalid notify webhook URL "${raw}"`)
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new ConfigError(`notify webhook must be an http(s) URL, got "${parsed.protocol}"`)
+  }
+  return raw
+}
+
+function resolveNotifyOn(raw: string | undefined): NotifyOn {
+  const value = (raw ?? 'failure').trim().toLowerCase()
+  if (value === 'failure' || value === 'always') return value
+  throw new ConfigError(`invalid SEVDESK_NOTIFY_ON "${raw}". Use "failure" or "always".`)
+}
+
 /**
  * Resolve the typed worker config with precedence flag > env > default. Throws a
  * ConfigError (mapped to EXIT.USAGE) for a missing credential or a bad value, so
@@ -136,5 +161,7 @@ export function resolveConfig(args: ParsedArgs, env: NodeJS.ProcessEnv = process
     maxRetries: parseIntEnv(env.SEVDESK_MAX_RETRIES, 4, 'max retries'),
     once: flagBool(args, 'once'),
     dryRun: flagBool(args, 'dry-run'),
+    notifyWebhook: resolveNotifyWebhook(pick(args, 'notify-webhook', env, 'SEVDESK_NOTIFY_WEBHOOK')),
+    notifyOn: resolveNotifyOn(env.SEVDESK_NOTIFY_ON),
   }
 }

@@ -1,0 +1,12 @@
+# Runs beliq-sevdesk.service every 15 minutes, and once ~2 minutes after boot.
+# Persistent=true catches up a missed run after downtime.
+[Unit]
+Description=Run beliq-sevdesk on a schedule
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

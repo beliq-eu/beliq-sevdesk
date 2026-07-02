@@ -1,0 +1,27 @@
+# systemd oneshot service: run beliq-sevdesk once. Paired with the .timer beside
+# it for a native (no-Docker) cron. Install both into /etc/systemd/system/, then:
+#
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now beliq-sevdesk.timer
+#   systemctl list-timers beliq-sevdesk.timer
+#   journalctl -u beliq-sevdesk.service -f
+#
+# Prereqs: `npm install -g beliq-sevdesk`; a `beliq` system user; a credentials
+# file at /etc/beliq-sevdesk.env (chmod 600, root-owned) with at least:
+#   SEVDESK_API_TOKEN=...
+#   BELIQ_API_KEY=...
+#   SEVDESK_TARGET_FORMATS=peppol-bis
+[Unit]
+Description=beliq-sevdesk: validate + convert sevDesk e-invoices via beliq
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=beliq
+Group=beliq
+EnvironmentFile=/etc/beliq-sevdesk.env
+Environment=SEVDESK_STATE_FILE=/var/lib/beliq-sevdesk/state.json
+Environment=SEVDESK_OUTPUT_DIR=/var/lib/beliq-sevdesk/out
+StateDirectory=beliq-sevdesk
+ExecStart=/usr/bin/beliq-sevdesk --once

@@ -1,0 +1,18 @@
+# Run beliq-sevdesk as a long-lived daemon that polls sevDesk on an interval.
+# Put SEVDESK_API_TOKEN, BELIQ_API_KEY, and SEVDESK_TARGET_FORMATS in a `.env`
+# file next to this one (copy ../.env.example), then:
+#
+#   docker compose up -d
+#   docker compose logs -f
+#
+# The high-water-mark and converted documents persist in ./state and ./out.
+services:
+  beliq-sevdesk:
+    image: ghcr.io/beliq-eu/beliq-sevdesk:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      SEVDESK_POLL_INTERVAL_SECONDS: "300"
+    volumes:
+      - ./state:/app/state
+      - ./out:/app/out

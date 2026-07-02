@@ -7,6 +7,7 @@ import type { Logger } from './log.js'
 import { IoError } from './errors.js'
 import { emptyCounts, summaryExitCode, type Classification, type Counts } from './exit.js'
 import { loadState, saveState } from './state.js'
+import { notify, type InvoiceOutcome, type NotifyReport } from './notify.js'
 
 /** Convert targets that produce a hybrid PDF rather than a standalone XML document. */
 const PDF_TARGETS = new Set<string>(['facturx', 'zugferd'])
@@ -22,6 +23,8 @@ export interface WorkerDeps {
   now?: () => number
   /** Injectable sleep for the daemon loop (tests). Defaults to a real timer. */
   sleep?: (ms: number) => Promise<void>
+  /** Injectable fetch for the notify webhook (tests). Defaults to global fetch. */
+  fetch?: typeof fetch
 }
 
 export interface PollResult {
@@ -133,6 +136,7 @@ export async function pollOnce(config: Config, deps: WorkerDeps): Promise<PollRe
   })
 
   const counts = emptyCounts()
+  const outcomes: InvoiceOutcome[] = []
   let highWater = state.lastInvoiceId
   let blocked = false
 
@@ -149,6 +153,7 @@ export async function pollOnce(config: Config, deps: WorkerDeps): Promise<PollRe
       })
     }
     counts[classification]++
+    outcomes.push({ id: inv.id, invoiceNumber: inv.invoiceNumber, classification })
     if (classification === 'error') blocked = true
     else if (!blocked) highWater = idNum
   }
@@ -160,8 +165,39 @@ export async function pollOnce(config: Config, deps: WorkerDeps): Promise<PollRe
     })
   }
 
-  deps.log.summary(formatSummary(counts, fresh.length, config.dryRun))
+  const summary = formatSummary(counts, fresh.length, config.dryRun)
+  deps.log.summary(summary)
+  await maybeNotify(config, deps, counts, outcomes, summary, now)
   return { counts, processedTo: highWater }
+}
+
+/**
+ * Fire the notify webhook when configured. Skipped in a dry run (a dry run has no
+ * side effects). With notifyOn=failure it POSTs only when an invoice failed; with
+ * notifyOn=always it POSTs after every poll (a heartbeat, best for --once/cron).
+ */
+async function maybeNotify(
+  config: Config,
+  deps: WorkerDeps,
+  counts: Counts,
+  outcomes: InvoiceOutcome[],
+  summary: string,
+  now: () => number,
+): Promise<void> {
+  const url = config.notifyWebhook
+  if (!url || config.dryRun) return
+
+  const failed = counts.invalid + counts.error > 0
+  if (config.notifyOn === 'failure' && !failed) return
+
+  const report: NotifyReport = {
+    ok: !failed,
+    summary,
+    counts,
+    invoices: outcomes,
+    polledAt: new Date(now()).toISOString(),
+  }
+  await notify(url, report, { fetch: deps.fetch ?? fetch, log: deps.log })
 }
 
 /**

@@ -23,6 +23,7 @@ const VALUE_FLAGS = new Set([
   'interval',
   'api-key',
   'sevdesk-token',
+  'notify-webhook',
 ])
 
 /**

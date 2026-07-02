@@ -77,6 +77,71 @@ A cron entry that runs it every 15 minutes:
 */15 * * * * SEVDESK_API_TOKEN=... BELIQ_API_KEY=... SEVDESK_TARGET_FORMATS=peppol-bis /usr/bin/beliq-sevdesk --once >> /var/log/beliq-sevdesk.log 2>&1
 ```
 
+## Run it in a container
+
+A prebuilt multi-arch image (amd64 + arm64) is published to GitHub Container
+Registry:
+
+```bash
+docker pull ghcr.io/beliq-eu/beliq-sevdesk:latest
+```
+
+The image ships only the compiled worker and `@beliq/sdk` from the public npm
+registry. No private beliq source is in it: all validation and conversion happen
+on the beliq API over HTTPS.
+
+The container's entrypoint is the worker, so arguments pass straight through. Run
+a single poll:
+
+```bash
+docker run --rm \
+  -e SEVDESK_API_TOKEN -e BELIQ_API_KEY -e SEVDESK_TARGET_FORMATS=peppol-bis \
+  -v "$PWD/out:/app/out" -v "$PWD/state:/app/state" \
+  ghcr.io/beliq-eu/beliq-sevdesk:latest --once
+```
+
+Inside the image the state file defaults to `/app/state/state.json` and the
+output dir to `/app/out`; mount volumes there to persist the high-water-mark and
+the converted documents across restarts. With no arguments the container loops as
+a daemon.
+
+## Example recipes
+
+Ready-to-copy deployment recipes are in [examples/](examples/):
+
+- [docker-compose.yml](examples/docker-compose.yml) runs it as a restart-on-failure daemon.
+- [beliq-sevdesk.service](examples/beliq-sevdesk.service) + [beliq-sevdesk.timer](examples/beliq-sevdesk.timer) run it natively on a systemd timer (no Docker).
+- [github-actions-cron.yml](examples/github-actions-cron.yml) polls on a schedule from GitHub Actions, failing the run when an invoice fails.
+
+## Notify on failures
+
+Set a webhook to get a JSON report POSTed after a poll:
+
+```bash
+export SEVDESK_NOTIFY_WEBHOOK=https://hooks.example.com/your/endpoint
+# SEVDESK_NOTIFY_ON=failure (default) posts only when an invoice fails;
+# SEVDESK_NOTIFY_ON=always posts after every poll (a heartbeat, good for cron).
+```
+
+The body:
+
+```json
+{
+  "ok": false,
+  "summary": "processed 2 invoice(s): 1 valid, 1 invalid, 0 error",
+  "counts": { "valid": 1, "invalid": 1, "error": 0 },
+  "invoices": [
+    { "id": "10", "invoiceNumber": "INV-10", "classification": "valid" },
+    { "id": "11", "invoiceNumber": "INV-11", "classification": "invalid" }
+  ],
+  "polledAt": "2025-06-15T12:00:00.000Z"
+}
+```
+
+Notify is best-effort: a slow, dead, or non-2xx endpoint is logged (host only, so
+a secret in the webhook path is never printed) and never changes the exit code.
+The exit code always reflects the invoices, not the notification.
+
 ## Configuration
 
 Every setting is read from the environment; the flags below override the matching
@@ -95,6 +160,8 @@ variable.
 | `SEVDESK_POLL_INTERVAL_SECONDS` | `--interval` | `300` | Seconds between polls in daemon mode. |
 | `SEVDESK_PAGE_SIZE` | | `100` | Page size for the invoice listing. |
 | `SEVDESK_MAX_RETRIES` | | `4` | Retries on a sevDesk 429 / 5xx / network error. |
+| `SEVDESK_NOTIFY_WEBHOOK` | `--notify-webhook` | (none) | POST a JSON poll report here. Empty = no notifications. |
+| `SEVDESK_NOTIFY_ON` | | `failure` | `failure` (only on a failed invoice) or `always` (every poll). |
 | `SEVDESK_BASE_URL` | | `https://api.sevdesk.de/api/v1` | Override for a mock or a future version. |
 | `BELIQ_BASE_URL` | | `https://api.beliq.eu` | Override for a self-hosted beliq. |
 | `BELIQ_AUTH` | | `header` | How the beliq key is sent: `header` (X-API-Key) or `bearer`. |
@@ -138,6 +205,9 @@ npm install
 npm run build
 npm test              # unit tests, no network
 npm run scrub:check   # no em-dash
+
+# build the container image locally:
+docker build -t beliq-sevdesk .
 
 # live smoke against the real sevDesk + beliq APIs (skipped without creds):
 SEVDESK_API_TOKEN=... BELIQ_API_KEY=... npm run test:integration

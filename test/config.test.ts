@@ -41,6 +41,34 @@ describe('resolveConfig defaults', () => {
     expect(c.targetFormats).toEqual([])
     expect(c.once).toBe(false)
     expect(c.dryRun).toBe(false)
+    expect(c.notifyWebhook).toBeUndefined()
+    expect(c.notifyOn).toBe('failure')
+  })
+})
+
+describe('resolveConfig notify', () => {
+  it('takes the webhook from the flag over env', () => {
+    const c = cfg(['--notify-webhook', 'https://flag.example/hook'], {
+      ...BASE_ENV,
+      SEVDESK_NOTIFY_WEBHOOK: 'https://env.example/hook',
+    })
+    expect(c.notifyWebhook).toBe('https://flag.example/hook')
+  })
+
+  it('rejects a non-URL webhook', () => {
+    expect(() => cfg(['--notify-webhook', 'not a url'])).toThrow(/invalid notify webhook/)
+  })
+
+  it('rejects a non-http(s) webhook scheme', () => {
+    expect(() => cfg(['--notify-webhook', 'ftp://example.com/hook'])).toThrow(/http\(s\)/)
+  })
+
+  it('accepts notify-on = always', () => {
+    expect(cfg([], { ...BASE_ENV, SEVDESK_NOTIFY_ON: 'always' }).notifyOn).toBe('always')
+  })
+
+  it('rejects an unknown notify-on', () => {
+    expect(() => cfg([], { ...BASE_ENV, SEVDESK_NOTIFY_ON: 'sometimes' })).toThrow(/SEVDESK_NOTIFY_ON/)
   })
 })
 

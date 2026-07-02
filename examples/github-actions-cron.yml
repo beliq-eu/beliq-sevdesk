@@ -1,0 +1,34 @@
+# Poll sevDesk from GitHub Actions on a schedule. Copy into a repo's
+# .github/workflows/, and add repo secrets SEVDESK_API_TOKEN, BELIQ_API_KEY, and
+# (optionally) SEVDESK_NOTIFY_WEBHOOK. The job fails (red run) when an invoice
+# fails validation, via the worker's exit code.
+name: beliq-sevdesk
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Carry the high-water-mark between runs so invoices are not reprocessed
+      # (and failures are not re-notified) every time. The run-id key forces a
+      # fresh save each run; restore-keys loads the most recent prior state.
+      - uses: actions/cache@v4
+        with:
+          path: .beliq-sevdesk-state.json
+          key: beliq-sevdesk-state-${{ github.run_id }}
+          restore-keys: beliq-sevdesk-state-
+
+      - run: npx beliq-sevdesk --once
+        env:
+          SEVDESK_API_TOKEN: ${{ secrets.SEVDESK_API_TOKEN }}
+          BELIQ_API_KEY: ${{ secrets.BELIQ_API_KEY }}
+          SEVDESK_TARGET_FORMATS: peppol-bis
+          SEVDESK_NOTIFY_WEBHOOK: ${{ secrets.SEVDESK_NOTIFY_WEBHOOK }}

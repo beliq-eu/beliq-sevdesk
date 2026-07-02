@@ -131,6 +131,41 @@ export function fakeSevdesk(opts: FakeSevdeskOptions): SevDesk & { xmlCalls: str
   }
 }
 
+export interface RecordedRequest {
+  url: string
+  method?: string
+  headers: Record<string, string>
+  body: string
+  hasSignal: boolean
+}
+
+/**
+ * A fetch that records every request and returns a canned response (or throws).
+ * Lets notify/worker tests assert the real webhook POST (method, headers, body,
+ * abort signal) with no network.
+ */
+export function recordingFetch(opts: { status?: number; throwErr?: Error } = {}): {
+  fetch: typeof fetch
+  requests: RecordedRequest[]
+} {
+  const requests: RecordedRequest[] = []
+  const f = (async (input: any, init?: RequestInit) => {
+    const headers: Record<string, string> = {}
+    const raw = init?.headers as Record<string, string> | undefined
+    if (raw) for (const [k, v] of Object.entries(raw)) headers[k.toLowerCase()] = String(v)
+    requests.push({
+      url: String(input),
+      method: init?.method,
+      headers,
+      body: typeof init?.body === 'string' ? init.body : '',
+      hasSignal: Boolean(init?.signal),
+    })
+    if (opts.throwErr) throw opts.throwErr
+    return new Response('', { status: opts.status ?? 200 })
+  }) as unknown as typeof fetch
+  return { fetch: f, requests }
+}
+
 /**
  * A fetch that mimics the sevDesk REST surface: paginated GET /Invoice and
  * GET /Invoice/{id}/getXml. Lets a test drive the REAL SevDeskClient (its

@@ -8,7 +8,15 @@ import { SevDeskClient } from '../src/sevdesk.js'
 import { pollOnce, runWorker } from '../src/worker.js'
 import { EXIT } from '../src/exit.js'
 import { SevDeskApiError } from '../src/errors.js'
-import { fakeBeliq, fakeSevdesk, recordingLogger, validResult, invalidResult, sevdeskFetch } from './helpers.js'
+import {
+  fakeBeliq,
+  fakeSevdesk,
+  recordingLogger,
+  recordingFetch,
+  validResult,
+  invalidResult,
+  sevdeskFetch,
+} from './helpers.js'
 
 const dec = new TextDecoder()
 const FIXED_NOW = 1_750_000_000_000
@@ -40,6 +48,7 @@ function baseConfig(over: Partial<Config> = {}): Config {
     maxRetries: 2,
     once: true,
     dryRun: false,
+    notifyOn: 'failure',
     ...over,
   }
 }
@@ -162,6 +171,91 @@ describe('pollOnce pipeline', () => {
       now: () => FIXED_NOW,
     })
     expect(res.counts.valid).toBe(1)
+  })
+})
+
+describe('notify webhook', () => {
+  const WEBHOOK = 'https://hooks.example.test/beliq'
+
+  it('notifyOn=failure POSTs a failure report when an invoice fails', async () => {
+    const sd = fakeSevdesk({ invoices: [{ id: '10', invoiceNumber: 'INV-10' }, { id: '11', invoiceNumber: 'INV-11' }] })
+    const { client } = fakeBeliq({
+      validate: (doc) => (dec.decode(doc).includes('id="11"') ? invalidResult() : validResult()),
+    })
+    const { fetch, requests } = recordingFetch()
+
+    await pollOnce(baseConfig({ notifyWebhook: WEBHOOK, notifyOn: 'failure' }), {
+      sevdesk: sd,
+      beliq: client,
+      log: recordingLogger().log,
+      now: () => FIXED_NOW,
+      fetch,
+    })
+
+    expect(requests).toHaveLength(1)
+    const body = JSON.parse(requests[0].body)
+    expect(body.ok).toBe(false)
+    expect(body.counts).toEqual({ valid: 1, invalid: 1, error: 0 })
+    expect(body.invoices).toEqual([
+      { id: '10', invoiceNumber: 'INV-10', classification: 'valid' },
+      { id: '11', invoiceNumber: 'INV-11', classification: 'invalid' },
+    ])
+    expect(body.polledAt).toBe(new Date(FIXED_NOW).toISOString())
+  })
+
+  it('notifyOn=failure stays silent when every invoice is valid', async () => {
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }] })
+    const { fetch, requests } = recordingFetch()
+    await pollOnce(baseConfig({ notifyWebhook: WEBHOOK, notifyOn: 'failure' }), {
+      sevdesk: sd,
+      beliq: fakeBeliq().client,
+      log: recordingLogger().log,
+      now: () => FIXED_NOW,
+      fetch,
+    })
+    expect(requests).toHaveLength(0)
+  })
+
+  it('notifyOn=always POSTs an ok report even when nothing failed', async () => {
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }] })
+    const { fetch, requests } = recordingFetch()
+    await pollOnce(baseConfig({ notifyWebhook: WEBHOOK, notifyOn: 'always' }), {
+      sevdesk: sd,
+      beliq: fakeBeliq().client,
+      log: recordingLogger().log,
+      now: () => FIXED_NOW,
+      fetch,
+    })
+    expect(requests).toHaveLength(1)
+    expect(JSON.parse(requests[0].body).ok).toBe(true)
+  })
+
+  it('does not notify in a dry run', async () => {
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }] })
+    const { fetch, requests } = recordingFetch()
+    await pollOnce(baseConfig({ notifyWebhook: WEBHOOK, notifyOn: 'always', dryRun: true }), {
+      sevdesk: sd,
+      beliq: fakeBeliq().client,
+      log: recordingLogger().log,
+      now: () => FIXED_NOW,
+      fetch,
+    })
+    expect(requests).toHaveLength(0)
+  })
+
+  it('a failing webhook does not change the exit code', async () => {
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }] })
+    const { fetch } = recordingFetch({ throwErr: new Error('webhook down') })
+    const { log, eventsNamed } = recordingLogger()
+    const code = await runWorker(baseConfig({ notifyWebhook: WEBHOOK, notifyOn: 'always' }), {
+      sevdesk: sd,
+      beliq: fakeBeliq().client,
+      log,
+      now: () => FIXED_NOW,
+      fetch,
+    })
+    expect(code).toBe(EXIT.OK)
+    expect(eventsNamed('notify.error')).toHaveLength(1)
   })
 })
 

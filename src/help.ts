@@ -27,6 +27,7 @@ Options:
   --interval <seconds>     seconds between polls in daemon mode (default: 300)
   --sevdesk-token <token>  sevDesk API token (default: SEVDESK_API_TOKEN)
   --api-key <key>          beliq API key (default: BELIQ_API_KEY)
+  --notify-webhook <url>   POST a JSON poll report here (default: SEVDESK_NOTIFY_WEBHOOK)
   -h, --help               show this help
   -v, --version            show the version
 
@@ -39,4 +40,7 @@ Exit codes (meaningful with --once):
 
 Set SEVDESK_API_TOKEN (Settings -> Advanced -> API) and BELIQ_API_KEY (beliq
 dashboard -> API Keys). The sevDesk token never leaves this environment.
+
+With a notify webhook set, SEVDESK_NOTIFY_ON=failure (default) POSTs only when an
+invoice fails; SEVDESK_NOTIFY_ON=always POSTs after every poll.
 `

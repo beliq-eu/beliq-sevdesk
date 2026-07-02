@@ -1,0 +1,16 @@
+node_modules
+dist
+test
+examples
+.github
+.git
+.gitignore
+.eslintrc.cjs
+vitest.config.ts
+.env
+.env.example
+.beliq-sevdesk-state.json
+out
+*.log
+README.md
+LICENSE
