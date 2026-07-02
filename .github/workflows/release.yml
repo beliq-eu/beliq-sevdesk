@@ -26,13 +26,13 @@ jobs:
   publish:
     runs-on: ubuntu-latest # Trusted Publishing requires a cloud-hosted runner
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # No `registry-url`: it writes an `.npmrc` with a token placeholder that
       # npm would use instead of OIDC, so publish would fail with a 404. npm
       # defaults to registry.npmjs.org and uses Trusted Publishing when the
       # token-auth `.npmrc` is absent.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
 
