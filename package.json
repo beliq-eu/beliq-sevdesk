@@ -1,6 +1,6 @@
 {
   "name": "beliq-sevdesk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-hostable worker that polls sevDesk for e-invoices, converts each to the formats a counterparty needs, and validates them against beliq's authority-pinned, drift-checked rules. The sevDesk token never leaves your environment.",
   "license": "MIT",
   "type": "module",
