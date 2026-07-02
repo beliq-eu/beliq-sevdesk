@@ -1,0 +1,21 @@
+node_modules
+dist
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+coverage
+
+# The worker's runtime output: the persisted high-water-mark and the converted
+# documents it writes. Never commit these.
+.beliq-sevdesk-state.json
+out/
+
+# Not committed: the published @beliq/sdk dependency is resolved fresh at install
+# time (CI uses `npm install`), and the lockfile is never published anyway.
+package-lock.json
+
+# Local SDK tarball used to verify against the published package shape before
+# @beliq/sdk is on npm.
+*.tgz

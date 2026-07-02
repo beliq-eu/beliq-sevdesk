@@ -1,0 +1,70 @@
+{
+  "name": "beliq-sevdesk",
+  "version": "0.1.0",
+  "description": "Self-hostable worker that polls sevDesk for e-invoices, converts each to the formats a counterparty needs, and validates them against beliq's authority-pinned, drift-checked rules. The sevDesk token never leaves your environment.",
+  "license": "MIT",
+  "type": "module",
+  "author": {
+    "name": "beliq",
+    "email": "hello@beliq.eu"
+  },
+  "homepage": "https://beliq.eu",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/beliq-eu/beliq-sevdesk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/beliq-eu/beliq-sevdesk/issues"
+  },
+  "keywords": [
+    "beliq",
+    "sevdesk",
+    "e-invoice",
+    "einvoice",
+    "xrechnung",
+    "zugferd",
+    "factur-x",
+    "peppol",
+    "en16931",
+    "validation",
+    "conversion",
+    "worker",
+    "cron"
+  ],
+  "engines": {
+    "node": ">=20.15"
+  },
+  "bin": {
+    "beliq-sevdesk": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "provenance": true
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "test": "vitest run --exclude test/integration.test.ts",
+    "test:integration": "vitest run test/integration.test.ts",
+    "scrub:check": "bash scripts/scrub-check.sh",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@beliq/sdk": "^0.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.8"
+  }
+}
