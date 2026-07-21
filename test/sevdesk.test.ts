@@ -144,3 +144,21 @@ describe('extractXml', () => {
     expect(() => extractXml('application/json', JSON.stringify({ objects: { note: 'x' } }))).toThrow(SevDeskApiError)
   })
 })
+
+describe('SevDeskClient request timeout', () => {
+  // A fetch that never resolves on its own; it only settles when the client
+  // aborts it via the injected signal, standing in for a stalled connection.
+  const hangingFetch = ((_url: unknown, init?: { signal?: AbortSignal }) =>
+    new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal
+      const fail = () => reject(new DOMException('aborted', 'AbortError'))
+      if (signal?.aborted) return fail()
+      signal?.addEventListener('abort', fail)
+    })) as unknown as typeof fetch
+
+  it('aborts a stalled request and surfaces a timeout error', async () => {
+    const c = client(hangingFetch, { maxRetries: 0, requestTimeoutMs: 20 })
+    await expect(c.getInvoiceXml('42')).rejects.toBeInstanceOf(SevDeskApiError)
+    await expect(c.getInvoiceXml('42')).rejects.toThrow(/timed out after 20ms/)
+  })
+})
