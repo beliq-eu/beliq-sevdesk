@@ -34,10 +34,15 @@ export interface SevDeskClientOptions {
   maxRetries?: number
   /** Base backoff delay; the nth retry waits baseRetryDelayMs * 2^n. Default 500. */
   baseRetryDelayMs?: number
+  /** Per-attempt request timeout in ms. A stalled request aborts and retries. Default 30000. */
+  requestTimeoutMs?: number
 }
 
 /** A hard ceiling on pages walked per poll, so a misconfigured window can't loop forever. */
 const MAX_PAGES = 100
+
+/** Per-attempt deadline so a stalled sevDesk connection aborts instead of hanging the poll. */
+const REQUEST_TIMEOUT_MS = 30_000
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8')
@@ -102,6 +107,7 @@ export class SevDeskClient implements SevDesk {
   readonly #sleep: (ms: number) => Promise<void>
   readonly #maxRetries: number
   readonly #baseRetryDelayMs: number
+  readonly #requestTimeoutMs: number
 
   constructor(options: SevDeskClientOptions) {
     if (!options.token) throw new Error('sevdesk: token is required')
@@ -115,6 +121,7 @@ export class SevDeskClient implements SevDesk {
     this.#sleep = options.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
     this.#maxRetries = options.maxRetries ?? 4
     this.#baseRetryDelayMs = options.baseRetryDelayMs ?? 500
+    this.#requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS
   }
 
   async listInvoices(params: ListInvoicesParams): Promise<SevDeskInvoice[]> {
@@ -163,25 +170,35 @@ export class SevDeskClient implements SevDesk {
 
     let lastError: Error | undefined
     for (let attempt = 0; attempt <= this.#maxRetries; attempt++) {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), this.#requestTimeoutMs)
       let res: Response
+      let text = ''
       try {
         res = await this.#fetch(url.toString(), {
           method,
           headers: { Authorization: this.#token, Accept: 'application/json' },
+          signal: controller.signal,
         })
+        // Read the body under the same deadline so a stalled stream also aborts.
+        if (res.ok) text = await res.text()
       } catch (err) {
-        lastError = err as Error
+        lastError = controller.signal.aborted
+          ? new Error(`timed out after ${this.#requestTimeoutMs}ms`)
+          : (err as Error)
         if (attempt < this.#maxRetries) {
           await this.#backoff(attempt)
           continue
         }
         throw new SevDeskApiError(`sevDesk ${method} ${path} network error: ${lastError.message}`, 0)
+      } finally {
+        clearTimeout(timer)
       }
 
       if (res.ok) {
         return {
           status: res.status,
-          text: await res.text(),
+          text,
           contentType: res.headers.get('content-type') ?? '',
         }
       }
