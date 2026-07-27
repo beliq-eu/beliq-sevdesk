@@ -6,7 +6,7 @@
 # private beliq source enters the image. All validation/conversion logic runs on
 # the beliq API over HTTPS and is never bundled here.
 # =============================================================================
-FROM node:22-bookworm-slim AS builder
+FROM node:24-bookworm-slim AS builder
 
 WORKDIR /build
 
@@ -24,7 +24,7 @@ RUN npm run build \
 # =============================================================================
 # Runtime
 # =============================================================================
-FROM node:22-bookworm-slim AS runner
+FROM node:24-bookworm-slim AS runner
 
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 --ingroup nodejs beliq
