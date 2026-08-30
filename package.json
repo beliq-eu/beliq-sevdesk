@@ -57,7 +57,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@beliq/sdk": "^0.2.0"
+    "@beliq/sdk": "^0.3.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
