@@ -11,15 +11,15 @@ FROM node:22-bookworm-slim AS builder
 WORKDIR /build
 
 # Install with devDeps (tsc), build, then prune to production deps so the runtime
-# layer carries no build tooling. No committed lockfile: @beliq/sdk resolves from
-# the registry, matching the release workflow.
-COPY package.json ./
-RUN npm install
+# layer carries no build tooling. The lockfile pins the tree, so the image
+# carries the same dependency versions CI gated the tag on.
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY tsconfig.json ./
 COPY src/ ./src/
 RUN npm run build \
   && rm -rf node_modules \
-  && npm install --omit=dev
+  && npm ci --omit=dev
 
 # =============================================================================
 # Runtime
