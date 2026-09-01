@@ -12,10 +12,6 @@ coverage
 .beliq-sevdesk-state.json
 out/
 
-# Not committed: the published @beliq/sdk dependency is resolved fresh at install
-# time (CI uses `npm install`), and the lockfile is never published anyway.
-package-lock.json
-
 # Local SDK tarball used to verify against the published package shape before
 # @beliq/sdk is on npm.
 *.tgz
