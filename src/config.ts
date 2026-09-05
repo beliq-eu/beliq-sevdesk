@@ -9,8 +9,11 @@ import { flagBool, flagStr, type ParsedArgs } from './args.js'
 import { ConfigError } from './errors.js'
 import type { NotifyOn } from './notify.js'
 
-/** sevDesk default REST base. Endpoints hang off /Invoice, /Invoice/{id}/getXml. */
-export const DEFAULT_SEVDESK_BASE_URL = 'https://api.sevdesk.de/api/v1'
+/**
+ * sevDesk default REST base. Endpoints hang off /Invoice, /Invoice/{id}/getXml.
+ * `api.sevdesk.de` serves the API documentation site and 404s every REST path.
+ */
+export const DEFAULT_SEVDESK_BASE_URL = 'https://my.sevdesk.de/api/v1'
 
 /** sevDesk invoice status codes (Settings dropdown values), keyed by friendly name. */
 const STATUS_CODES: Record<string, string> = { draft: '100', open: '200', paid: '1000' }
