@@ -99,6 +99,23 @@ describe('SevDeskClient retry/backoff', () => {
     const fetchImpl = (async () => json({ nope: true })) as any
     await expect(client(fetchImpl).listInvoices({})).rejects.toBeInstanceOf(SevDeskApiError)
   })
+
+  it('names the base URL when an HTML 404 says it is not the REST API', async () => {
+    const fetchImpl = (async () =>
+      new Response('<html><title>sevdesk - API</title></html>', {
+        status: 404,
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      })) as any
+    const c = client(fetchImpl, { baseUrl: 'https://api.sevdesk.de/api/v1' })
+    await expect(c.listInvoices({})).rejects.toThrow(
+      /https:\/\/api\.sevdesk\.de\/api\/v1 is not the REST API.*SEVDESK_BASE_URL/s,
+    )
+  })
+
+  it('leaves a JSON 404 on the plain status message', async () => {
+    const fetchImpl = (async () => json({ error: 'no such invoice' }, 404)) as any
+    await expect(client(fetchImpl).listInvoices({})).rejects.toThrow(/failed with status 404$/)
+  })
 })
 
 describe('SevDeskClient.getInvoiceXml', () => {

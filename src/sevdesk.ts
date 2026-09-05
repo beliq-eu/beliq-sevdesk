@@ -207,6 +207,15 @@ export class SevDeskClient implements SevDesk {
         await this.#backoff(attempt)
         continue
       }
+      // An HTML 404 means the base URL is not the REST API. api.sevdesk.de serves the
+      // documentation site and answers every REST path this way.
+      if (res.status === 404 && (res.headers.get('content-type') ?? '').includes('text/html')) {
+        throw new SevDeskApiError(
+          `sevDesk ${method} ${path} returned an HTML 404: ${this.#baseUrl} is not the REST API. ` +
+            'The REST base is https://my.sevdesk.de/api/v1; check SEVDESK_BASE_URL.',
+          res.status,
+        )
+      }
       throw new SevDeskApiError(`sevDesk ${method} ${path} failed with status ${res.status}`, res.status)
     }
     // Unreachable: the loop either returns or throws. Satisfies noImplicitReturns.
