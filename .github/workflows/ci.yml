@@ -26,3 +26,86 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run scrub:check
+
+  # test:integration walks the real pipeline read-only (--once --dry-run): it
+  # lists sevDesk invoices, pulls each one's XML, converts and validates. The
+  # cost is not fixed, because it processes every invoice the poll window
+  # returns, so the preflight asks for a floor rather than an exact count.
+  # BELIQ_API_KEY is a `blq_test_` sandbox key: it runs the full rule stack but
+  # draws on the sandbox allowance instead of the plan quota.
+  #
+  # SEVDESK_API_TOKEN is not set, so this job reports as skipped rather than
+  # green. That is the honest state: the sevDesk half of the contract is not
+  # verified by CI, and a skipped job says so where a passing one would not.
+  preflight:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      # GET /v1/me is quota-exempt, so asking what is left costs nothing. A
+      # credential that is absent (forks) and an allowance that is spent are the
+      # same condition from the test's point of view: the contract could not be
+      # checked, which is not the same as the contract being broken.
+      - id: decide
+        env:
+          BELIQ_API_KEY: ${{ secrets.BELIQ_API_KEY }}
+          SEVDESK_API_TOKEN: ${{ secrets.SEVDESK_API_TOKEN }}
+        run: |
+          set -uo pipefail
+
+          # A floor: one poll, plus a convert and a validate for the first invoice.
+          needed=3
+
+          if [ -z "${SEVDESK_API_TOKEN:-}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::SEVDESK_API_TOKEN is not set, so the live pipeline was NOT verified by this run."
+            exit 0
+          fi
+
+          if [ -z "${BELIQ_API_KEY:-}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "BELIQ_API_KEY is not set; skipping the live smoke test."
+            exit 0
+          fi
+
+          body="$(curl -sS --max-time 30 \
+            -H "Authorization: Bearer $BELIQ_API_KEY" \
+            https://api.beliq.eu/v1/me)" || body=''
+          remaining="$(printf '%s' "$body" | jq -r '.data.quota.remaining // empty')" || remaining=''
+          resets="$(printf '%s' "$body" | jq -r '.data.quota.resetsAt // empty')" || resets='unknown'
+
+          # An unreadable answer is not a reason to skip: /v1/me is an
+          # optimisation, and a real API outage should surface as a red live job
+          # rather than a quiet one.
+          if ! printf '%s' "$remaining" | grep -qE '^[0-9]+$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "could not read the remaining quota from /v1/me; running the live test anyway"
+            exit 0
+          fi
+
+          echo "quota remaining: $remaining, resets $resets"
+          if [ "$remaining" -lt "$needed" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::beliq API allowance is spent ($remaining of $needed documents left, resets $resets), so the live contract was NOT verified by this run."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  live:
+    needs: preflight
+    if: needs.preflight.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Live API smoke test
+        env:
+          BELIQ_API_KEY: ${{ secrets.BELIQ_API_KEY }}
+          SEVDESK_API_TOKEN: ${{ secrets.SEVDESK_API_TOKEN }}
+        run: npm run test:integration
