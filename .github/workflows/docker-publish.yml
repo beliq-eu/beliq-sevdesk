@@ -10,6 +10,13 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
 
+# One release at a time, never cancelled midway: two tags pushed together would
+# otherwise publish in parallel and finish in either order. GitHub keeps one
+# waiting run per group, so a third tag cancels the waiting one; re-run it.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
   packages: write
@@ -20,8 +27,25 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0 # the guard below needs main's history
+
+      # workflow_dispatch offers every branch, and a tag can point at any commit.
+      # This stops a release from the wrong place by mistake. It is no defence
+      # against an edit to this file: a tag runs the workflow as of its commit.
+      - name: Release only from a vX.Y.Z tag on main
+        run: |
+          if ! [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::a release runs from a vX.Y.Z tag, not from $GITHUB_REF"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$GITHUB_REF_NAME points at $(git rev-parse --short HEAD), which is not on main"
+            exit 1
+          fi
 
       # Gate the image on the same checks as CI, so a tag whose tests fail never
       # produces a published image.
