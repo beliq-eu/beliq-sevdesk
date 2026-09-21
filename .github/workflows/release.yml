@@ -84,5 +84,14 @@ jobs:
       - name: Em-dash scrub check
         run: npm run scrub:check
 
+      - name: package.json version matches the tag
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have="$(node -p "require('./package.json').version")"
+          test "$want" = "$have" || {
+            echo "tag says $want, package.json says $have"
+            exit 1
+          }
+
       - name: Publish to npm
         run: npm publish
