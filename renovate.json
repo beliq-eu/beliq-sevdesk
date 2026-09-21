@@ -1,4 +1,16 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["local>beliq-eu/.github:automerge"]
+  "extends": [
+    "local>beliq-eu/.github:automerge"
+  ],
+  "packageRules": [
+    {
+      "description": "vitest 5 drops Node 20 from its type peer: vitest 4.1.11 peerOptional-requires `@types/node ^20.0.0 || ^22.0.0 || >=24.0.0`, vitest 5.0.0 requires `^22.0.0 || >=24.0.0`. This repo pins `@types/node ^20.14.0` to track its engines floor, so npm cannot resolve and the pull request can never go green. Raising the pin to ^20.19.0 does not help: that satisfies vite 8, which is the conflict npm prints first, but not vitest 5 itself, which is the one that actually blocks. The only pin vitest 5 accepts is ^22 or >=24, and that means raising the engines floor off Node 20 first. Lift this together with engines.node and @types/node, not on its own.",
+      "matchPackageNames": [
+        "vitest",
+        "@vitest/**"
+      ],
+      "allowedVersions": "<5.0.0"
+    }
+  ]
 }
