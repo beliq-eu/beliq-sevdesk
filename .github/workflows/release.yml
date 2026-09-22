@@ -64,6 +64,7 @@ jobs:
       # Trusted Publishing + automatic provenance need npm >= 11.5.1. Pinned, not
       # @latest, so a new npm release reaches a publish only through a reviewed bump.
       - name: Upgrade npm
+        # renovate: datasource=npm depName=npm
         run: npm install -g npm@12.0.2
 
       - name: Install dependencies
