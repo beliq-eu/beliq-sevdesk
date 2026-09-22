@@ -9,9 +9,9 @@ name: Release
 #
 # One-time setup on npmjs.com: configure beliq-eu/beliq-sevdesk as a Trusted
 # Publisher for the beliq-sevdesk package (package Settings -> Publishing access
-# -> GitHub Actions, workflow `release.yml`). The first v0.1.0 release is
-# bootstrapped with a local `npm publish`; every tag from then on flows through
-# here with provenance.
+# -> GitHub Actions, workflow `release.yml`, environment `release`). The first
+# v0.1.0 release is bootstrapped with a local `npm publish`; every tag from then
+# on flows through here with provenance.
 on:
   push:
     tags:
@@ -33,6 +33,10 @@ jobs:
   publish:
     runs-on: ubuntu-latest # Trusted Publishing requires a cloud-hosted runner
     timeout-minutes: 15
+    # The half an edit to this file cannot remove. GitHub refuses to start the
+    # job unless the ref matches this environment's `v*.*.*` tag policy, and
+    # npm only accepts a Trusted Publishing token from a run in it.
+    environment: release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -41,6 +45,7 @@ jobs:
       # workflow_dispatch offers every branch, and a tag can point at any commit.
       # This stops a release from the wrong place by mistake. It is no defence
       # against an edit to this file: a tag runs the workflow as of its commit.
+      # The `release` environment above is that defence.
       - name: Release only from a vX.Y.Z tag on main
         run: |
           if ! [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
