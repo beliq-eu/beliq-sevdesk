@@ -26,7 +26,13 @@ RUN npm run build \
 # =============================================================================
 FROM node:22-bookworm-slim AS runner
 
-RUN addgroup --system --gid 1001 nodejs \
+# The npm CLI the base ships is deleted rather than upgraded: it carries tar,
+# pacote, sigstore, brace-expansion, ip-address and picomatch advisories (all 11
+# of the image's HIGH/CRITICAL findings, including CVE-2026-59873 in tar), and
+# the worker never runs it. ENTRYPOINT is `node dist/index.js`, and every npm
+# step happens in the builder stage above.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+  && addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 --ingroup nodejs beliq
 
 WORKDIR /app
