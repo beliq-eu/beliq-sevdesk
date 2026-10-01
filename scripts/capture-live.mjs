@@ -135,7 +135,7 @@ async function call(label, method, path, { query, body, token = TOKEN } = {}) {
         label,
         request: { method, path, query: query ?? null, body: body ?? null },
         status: res.status,
-        headers: Object.fromEntries(res.headers),
+        headers: Object.fromEntries([...res.headers].filter(([name]) => name !== 'set-cookie')),
         body: json ?? text,
       },
       null,
@@ -200,6 +200,28 @@ async function firstId(label, path, query) {
   return String(id)
 }
 
+/** sevDesk takes an invoice's recipient address from the contact's billing address. */
+async function billingAddressCategory() {
+  const res = await must('addressCategory', 'GET', '/Category', { query: { objectType: 'ContactAddress' } })
+  const billing = objects(res).find((c) => c.name === 'Rechnungsanschrift')
+  if (!billing) throw new Error('/Category has no Rechnungsanschrift, so the seed has no address category')
+  return String(billing.id)
+}
+
+/**
+ * The tax rule the account may invoice under. sevDesk's API overview lists rule 1
+ * (Umsatzsteuerpflichtige Umsaetze, rates 0, 7, 19) for a regular account and
+ * rule 11 (Steuer nicht erhoben nach §19 UStG, rate 0) for a small business,
+ * whose invoices "must not contain any vat".
+ */
+async function taxSetup() {
+  const res = await must('sevClient', 'GET', '/SevClient')
+  const smallSettlement = objects(res)[0]?.smallSettlement === '1'
+  return smallSettlement
+    ? { smallSettlement, rule: '11', rate: 0, text: 'Steuer nicht erhoben nach §19 UStG' }
+    : { smallSettlement, rule: '1', rate: 19, text: 'Umsatzsteuer 19%' }
+}
+
 async function createContact(label, withBuyerReference, refs) {
   const contact = await must(`contact-${label}`, 'POST', '/Contact', {
     body: {
@@ -254,9 +276,10 @@ async function createInvoice(label, { contactId, eInvoice, daysBack = 0 }, refs)
         addressCountry: { id: refs.country, objectName: 'StaticCountry' },
         paymentMethod: { id: refs.paymentMethod, objectName: 'PaymentMethod' },
         taxRate: 0,
-        taxRule: { id: '1', objectName: 'TaxRule' },
-        taxText: 'Umsatzsteuer 19%',
+        taxRule: { id: refs.tax.rule, objectName: 'TaxRule' },
+        taxText: refs.tax.text,
         taxType: 'default',
+        smallSettlement: refs.tax.smallSettlement,
         invoiceType: 'RE',
         currency: 'EUR',
         propertyIsEInvoice: eInvoice,
@@ -269,7 +292,7 @@ async function createInvoice(label, { contactId, eInvoice, daysBack = 0 }, refs)
           price: 100,
           name: 'Testposition',
           unity: { id: refs.unity, objectName: 'Unity' },
-          taxRate: 19,
+          taxRate: refs.tax.rate,
         },
       ],
     },
@@ -292,8 +315,9 @@ async function seed() {
     unity: await firstId('unity', '/Unity'),
     paymentMethod: await firstId('paymentMethod', '/PaymentMethod'),
     communicationKey: await firstId('communicationKey', '/CommunicationWayKey'),
-    addressCategory: await firstId('addressCategory', '/Category', { objectType: 'ContactAddress' }),
+    addressCategory: await billingAddressCategory(),
     country: '1',
+    tax: await taxSetup(),
   }
   const withRef = await createContact('mit-Referenz', true, refs)
   const withoutRef = await createContact('ohne-Referenz', false, refs)
@@ -387,7 +411,7 @@ async function cycle() {
           price: 50,
           name: 'Nachtrag',
           unity: { id: refs.unity, objectName: 'Unity' },
-          taxRate: 19,
+          taxRate: refs.tax.rate,
         },
       ],
     },
