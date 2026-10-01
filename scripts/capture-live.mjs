@@ -24,6 +24,8 @@ const SECONDS_PER_DAY = 86_400
 /** Older than the worker's default 30-day poll window, so the list must leave it out. */
 const BACKDATED_DAYS = 45
 const ERROR_TEXT_MAX = 300
+/** Enough of the document to hold the root element's qualified name. */
+const XML_NAME_SCAN_CHARS = 200
 
 /** Fields whose values are safe to print: ids, codes, flags and dates, never party data. */
 const PRINTABLE = new Set([
@@ -68,10 +70,24 @@ function printable(obj) {
   return Object.fromEntries(Object.entries(obj).filter(([k, v]) => PRINTABLE.has(k) && typeof v !== 'object'))
 }
 
-/** The first element of an XML document and its namespace, without printing any content. */
+/** The first element of an XML document, without printing any content. */
 function xmlRoot(text) {
-  const m = /<([A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)[\s>/]/.exec(text.replace(/<\?[\s\S]*?\?>|<!--[\s\S]*?-->/g, ''))
-  return m ? `${m[1] ?? ''}${m[2]}` : 'not XML'
+  let at = 0
+  for (;;) {
+    at = text.indexOf('<', at)
+    if (at < 0) return 'not XML'
+    const skip = [
+      ['<?', '?>'],
+      ['<!--', '-->'],
+      ['<!', '>'],
+    ].find(([open]) => text.startsWith(open, at))
+    if (!skip) break
+    const end = text.indexOf(skip[1], at + skip[0].length)
+    if (end < 0) return 'not XML'
+    at = end + skip[1].length
+  }
+  const name = /^<([A-Za-z_][\w.:-]*)/.exec(text.slice(at, at + XML_NAME_SCAN_CHARS))
+  return name ? name[1] : 'not XML'
 }
 
 /** What sevDesk says went wrong. An error text names a field or a rule, not a party. */
