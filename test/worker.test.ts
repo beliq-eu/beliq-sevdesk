@@ -73,7 +73,7 @@ describe('pollOnce pipeline', () => {
 
     const res = await pollOnce(baseConfig(), { sevdesk: sd, beliq: client, log, now: () => FIXED_NOW })
 
-    expect(res.counts).toEqual({ valid: 2, invalid: 0, error: 0 })
+    expect(res.counts).toEqual({ valid: 2, invalid: 0, error: 0, skipped: 0 })
     // Converted files, named by invoice number + target, written to the output dir.
     expect(await outFiles()).toEqual(['INV-10-ubl.xml', 'INV-11-ubl.xml'])
     expect(dec.decode(await readFile(join(dir, 'out', 'INV-11-ubl.xml')))).toContain('target="ubl"')
@@ -100,7 +100,7 @@ describe('pollOnce pipeline', () => {
     const b2 = fakeBeliq()
     const res = await pollOnce(cfg, { sevdesk: second, beliq: b2.client, log: recordingLogger().log, now: () => FIXED_NOW })
 
-    expect(res.counts).toEqual({ valid: 0, invalid: 0, error: 0 })
+    expect(res.counts).toEqual({ valid: 0, invalid: 0, error: 0, skipped: 0 })
     expect(second.xmlCalls).toEqual([])
     expect(b2.calls).toHaveLength(0)
     expect((await readState()).processedIds).toEqual(['10', '11'])
@@ -113,7 +113,7 @@ describe('pollOnce pipeline', () => {
     })
     const res = await pollOnce(baseConfig(), { sevdesk: sd, beliq: client, log: recordingLogger().log, now: () => FIXED_NOW })
 
-    expect(res.counts).toEqual({ valid: 1, invalid: 1, error: 0 })
+    expect(res.counts).toEqual({ valid: 1, invalid: 1, error: 0, skipped: 0 })
     expect((await readState()).processedIds).toEqual(['10', '11'])
   })
 
@@ -124,7 +124,7 @@ describe('pollOnce pipeline', () => {
 
     const res = await pollOnce(baseConfig(), { sevdesk: sd, beliq: fakeBeliq().client, log, now: () => FIXED_NOW })
 
-    expect(res.counts).toEqual({ valid: 2, invalid: 0, error: 1 })
+    expect(res.counts).toEqual({ valid: 2, invalid: 0, error: 1, skipped: 0 })
     expect((await readState()).processedIds).toEqual(['10', '12'])
     expect(eventsNamed('invoice.error')).toHaveLength(1)
 
@@ -136,7 +136,7 @@ describe('pollOnce pipeline', () => {
       now: () => FIXED_NOW,
     })
     expect(second.xmlCalls).toEqual(['11'])
-    expect(again.counts).toEqual({ valid: 1, invalid: 0, error: 0 })
+    expect(again.counts).toEqual({ valid: 1, invalid: 0, error: 0, skipped: 0 })
     expect((await readState()).processedIds).toEqual(['10', '11', '12'])
   })
 
@@ -155,7 +155,7 @@ describe('pollOnce pipeline', () => {
     })
 
     expect(second.xmlCalls).toEqual(['10'])
-    expect(res.counts).toEqual({ valid: 1, invalid: 0, error: 0 })
+    expect(res.counts).toEqual({ valid: 1, invalid: 0, error: 0, skipped: 0 })
   })
 
   it('keeps processed ids that a later, shorter listing leaves out', async () => {
@@ -168,7 +168,7 @@ describe('pollOnce pipeline', () => {
     const res = await pollOnce(cfg, { sevdesk: third, beliq: fakeBeliq().client, log: recordingLogger().log })
 
     expect(third.xmlCalls).toEqual([])
-    expect(res.counts).toEqual({ valid: 0, invalid: 0, error: 0 })
+    expect(res.counts).toEqual({ valid: 0, invalid: 0, error: 0, skipped: 0 })
   })
 
   it('processes an invoice once when two pages return it', async () => {
@@ -176,7 +176,29 @@ describe('pollOnce pipeline', () => {
     const res = await pollOnce(baseConfig(), { sevdesk: sd, beliq: fakeBeliq().client, log: recordingLogger().log })
 
     expect(sd.xmlCalls).toEqual(['10', '11'])
-    expect(res.counts).toEqual({ valid: 2, invalid: 0, error: 0 })
+    expect(res.counts).toEqual({ valid: 2, invalid: 0, error: 0, skipped: 0 })
+  })
+
+  it('skips an invoice that is not an e-invoice, once, and does not fail the run', async () => {
+    const invoices = [{ id: '10' }, { id: '11' }]
+    const sd = fakeSevdesk({ invoices, notEInvoice: new Set(['10']) })
+    const { client, calls } = fakeBeliq()
+    const { log, eventsNamed, summaries } = recordingLogger()
+
+    const code = await runWorker(baseConfig(), { sevdesk: sd, beliq: client, log, now: () => FIXED_NOW })
+
+    expect(code).toBe(EXIT.OK)
+    expect(summaries).toEqual(['processed 2 invoice(s): 1 valid, 0 invalid, 0 error, 1 skipped'])
+    expect(eventsNamed('invoice.skipped')[0].fields).toEqual({ id: '10', number: undefined, reason: 'not an e-invoice' })
+    // beliq was never asked about the invoice sevDesk holds no XML for.
+    expect(calls.every((c) => c.doc.includes('id="11"'))).toBe(true)
+    expect(await outFiles()).toEqual(['11-ubl.xml'])
+    expect((await readState()).processedIds).toEqual(['10', '11'])
+
+    const second = fakeSevdesk({ invoices, notEInvoice: new Set(['10']) })
+    const again = await pollOnce(baseConfig(), { sevdesk: second, beliq: fakeBeliq().client, log: recordingLogger().log })
+    expect(second.xmlCalls).toEqual([])
+    expect(again.counts).toEqual({ valid: 0, invalid: 0, error: 0, skipped: 0 })
   })
 
   it('runs validation-only when no target formats are configured', async () => {
@@ -243,7 +265,7 @@ describe('notify webhook', () => {
     expect(requests).toHaveLength(1)
     const body = JSON.parse(requests[0].body)
     expect(body.ok).toBe(false)
-    expect(body.counts).toEqual({ valid: 1, invalid: 1, error: 0 })
+    expect(body.counts).toEqual({ valid: 1, invalid: 1, error: 0, skipped: 0 })
     expect(body.invoices).toEqual([
       { id: '10', invoiceNumber: 'INV-10', classification: 'valid' },
       { id: '11', invoiceNumber: 'INV-11', classification: 'invalid' },
@@ -253,6 +275,19 @@ describe('notify webhook', () => {
 
   it('notifyOn=failure stays silent when every invoice is valid', async () => {
     const sd = fakeSevdesk({ invoices: [{ id: '10' }] })
+    const { fetch, requests } = recordingFetch()
+    await pollOnce(baseConfig({ notifyWebhook: WEBHOOK, notifyOn: 'failure' }), {
+      sevdesk: sd,
+      beliq: fakeBeliq().client,
+      log: recordingLogger().log,
+      now: () => FIXED_NOW,
+      fetch,
+    })
+    expect(requests).toHaveLength(0)
+  })
+
+  it('notifyOn=failure stays silent when the only other invoice was skipped', async () => {
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }], notEInvoice: new Set(['10']) })
     const { fetch, requests } = recordingFetch()
     await pollOnce(baseConfig({ notifyWebhook: WEBHOOK, notifyOn: 'failure' }), {
       sevdesk: sd,
@@ -361,6 +396,25 @@ describe('runWorker with the real SevDeskClient (injected fetch)', () => {
   })
 })
 
+describe('a normal invoice through the real SevDeskClient', () => {
+  it('turns sevDesk\'s recorded getXml answer into a skip, not an error', async () => {
+    const sevdesk = new SevDeskClient({
+      token: 'tok',
+      baseUrl: 'https://api.example.test/api/v1',
+      fetch: sevdeskFetch({ invoices: [{ id: '1' }, { id: '2' }], notEInvoice: new Set(['1']) }),
+      sleep: async () => {},
+    })
+    const { log, summaries } = recordingLogger()
+
+    const code = await runWorker(baseConfig(), { sevdesk, beliq: fakeBeliq().client, log, now: () => FIXED_NOW })
+
+    expect(code).toBe(EXIT.OK)
+    expect(summaries).toEqual(['processed 2 invoice(s): 1 valid, 0 invalid, 0 error, 1 skipped'])
+    expect(await outFiles()).toEqual(['2-ubl.xml'])
+    expect((await readState()).processedIds).toEqual(['1', '2'])
+  })
+})
+
 describe('a state file written before 0.3.0', () => {
   const writeLegacy = (lastInvoiceId: number) =>
     writeFile(join(dir, 'state.json'), JSON.stringify({ lastInvoiceId, lastPolledAt: '2026-09-01T00:00:00.000Z' }))
@@ -372,7 +426,7 @@ describe('a state file written before 0.3.0', () => {
     const res = await pollOnce(baseConfig(), { sevdesk: sd, beliq: fakeBeliq().client, log: recordingLogger().log, now: () => FIXED_NOW })
 
     expect(sd.xmlCalls).toEqual(['12'])
-    expect(res.counts).toEqual({ valid: 1, invalid: 0, error: 0 })
+    expect(res.counts).toEqual({ valid: 1, invalid: 0, error: 0, skipped: 0 })
     const state = await readState()
     expect(state.processedIds).toEqual(['10', '11', '12'])
     expect(state.lastInvoiceId).toBeUndefined()

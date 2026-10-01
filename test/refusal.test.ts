@@ -113,14 +113,14 @@ describe('a beliq answer about the document ends the invoice', () => {
     answer = () => refuse(status, code)
 
     const first = await poll()
-    expect(first.counts).toEqual({ valid: 0, invalid: 0, error: 1 })
+    expect(first.counts).toEqual({ valid: 0, invalid: 0, error: 1, skipped: 0 })
     expect(first.eventsNamed('validate.refused')[0].fields).toMatchObject({ id: '10', status, code })
     expect(await processedIds()).toEqual(['10'])
 
     hits = []
     const second = await poll()
     expect(hits).toEqual([])
-    expect(second.counts).toEqual({ valid: 0, invalid: 0, error: 0 })
+    expect(second.counts).toEqual({ valid: 0, invalid: 0, error: 0, skipped: 0 })
   })
 
   it('a refused conversion of a valid document is an error, with the verdict kept in the log', async () => {
@@ -128,7 +128,7 @@ describe('a beliq answer about the document ends the invoice', () => {
 
     const first = await poll()
     expect(hits).toEqual(['/v1/validate', '/v1/convert:ubl'])
-    expect(first.counts).toEqual({ valid: 0, invalid: 0, error: 1 })
+    expect(first.counts).toEqual({ valid: 0, invalid: 0, error: 1, skipped: 0 })
     expect(first.eventsNamed('validate')[0].fields).toMatchObject({ id: '10', valid: true })
     expect(first.eventsNamed('convert.refused')[0].fields).toMatchObject({
       id: '10',
@@ -147,7 +147,7 @@ describe('a beliq answer about the document ends the invoice', () => {
     answer = (path) => (path === '/v1/validate' ? INVALID : refuse(422, 'VALIDATION_ERROR'))
 
     const first = await poll()
-    expect(first.counts).toEqual({ valid: 0, invalid: 1, error: 0 })
+    expect(first.counts).toEqual({ valid: 0, invalid: 1, error: 0, skipped: 0 })
     expect(await processedIds()).toEqual(['10'])
   })
 
@@ -159,7 +159,7 @@ describe('a beliq answer about the document ends the invoice', () => {
 
     const first = await poll(config({ targetFormats: ['cii', 'ubl'] }))
     expect(hits).toEqual(['/v1/validate', '/v1/convert:cii', '/v1/convert:ubl'])
-    expect(first.counts).toEqual({ valid: 0, invalid: 0, error: 1 })
+    expect(first.counts).toEqual({ valid: 0, invalid: 0, error: 1, skipped: 0 })
     expect(await readdir(join(dir, 'out'))).toEqual(['10-ubl.xml'])
   })
 })
@@ -175,14 +175,14 @@ describe('a beliq answer about the caller leaves the invoice for the next poll',
     answer = () => refuse(status, code)
 
     const first = await poll()
-    expect(first.counts).toEqual({ valid: 0, invalid: 0, error: 1 })
+    expect(first.counts).toEqual({ valid: 0, invalid: 0, error: 1, skipped: 0 })
     expect(first.eventsNamed('invoice.error')).toHaveLength(1)
     expect(first.eventsNamed('validate.refused')).toHaveLength(0)
     expect(await processedIds()).toEqual([])
 
     answer = (path) => (path === '/v1/validate' ? VALID : CONVERTED)
     const second = await poll()
-    expect(second.counts).toEqual({ valid: 1, invalid: 0, error: 0 })
+    expect(second.counts).toEqual({ valid: 1, invalid: 0, error: 0, skipped: 0 })
     expect(await processedIds()).toEqual(['10'])
   })
 
@@ -190,14 +190,14 @@ describe('a beliq answer about the caller leaves the invoice for the next poll',
     answer = (path) => (path === '/v1/validate' ? VALID : refuse(429, 'QUOTA_EXCEEDED'))
 
     const first = await poll()
-    expect(first.counts).toEqual({ valid: 0, invalid: 0, error: 1 })
+    expect(first.counts).toEqual({ valid: 0, invalid: 0, error: 1, skipped: 0 })
     expect(await processedIds()).toEqual([])
 
     hits = []
     answer = (path) => (path === '/v1/validate' ? VALID : CONVERTED)
     const second = await poll()
     expect(hits).toEqual(['/v1/validate', '/v1/convert:ubl'])
-    expect(second.counts).toEqual({ valid: 1, invalid: 0, error: 0 })
+    expect(second.counts).toEqual({ valid: 1, invalid: 0, error: 0, skipped: 0 })
     expect(await readdir(join(dir, 'out'))).toEqual(['10-ubl.xml'])
   })
 })

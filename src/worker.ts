@@ -4,7 +4,7 @@ import type { Config } from './config.js'
 import { isDocumentRefusal, type BeliqClient } from './beliq.js'
 import type { SevDesk, SevDeskInvoice } from './sevdesk.js'
 import type { Logger } from './log.js'
-import { IoError } from './errors.js'
+import { IoError, NotAnEInvoiceError } from './errors.js'
 import { emptyCounts, summaryExitCode, type Classification, type Counts } from './exit.js'
 import { loadState, saveState } from './state.js'
 import { notify, type InvoiceOutcome, type NotifyReport } from './notify.js'
@@ -65,13 +65,20 @@ async function writeOutput(dir: string, name: string, bytes: Uint8Array): Promis
  * to each configured target and write the bytes out. Validation runs first so a
  * conversion beliq refuses cannot cost the verdict.
  *
- * A refusal about the document itself is final: the same bytes get the same
- * answer next poll. Anything else that throws (sevDesk, the network, a spent
+ * An invoice sevDesk holds no XML for is skipped for good. A refusal about the
+ * document itself is final too: the same bytes get the same answer next poll. Anything else that throws (sevDesk, the network, a spent
  * quota, a full disk) propagates, and the caller leaves the invoice for the
  * next poll.
  */
 async function processInvoice(inv: SevDeskInvoice, config: Config, deps: WorkerDeps): Promise<InvoiceResult> {
-  const xml = await deps.sevdesk.getInvoiceXml(inv.id)
+  let xml: Uint8Array
+  try {
+    xml = await deps.sevdesk.getInvoiceXml(inv.id)
+  } catch (err) {
+    if (!(err instanceof NotAnEInvoiceError)) throw err
+    deps.log.info('invoice.skipped', { id: inv.id, number: inv.invoiceNumber, reason: 'not an e-invoice' })
+    return { classification: 'skipped', final: true }
+  }
 
   let valid: boolean
   try {
@@ -130,7 +137,7 @@ async function processInvoice(inv: SevDeskInvoice, config: Config, deps: WorkerD
 
 function formatSummary(counts: Counts, fresh: number, dryRun: boolean): string {
   const prefix = dryRun ? '[dry-run] ' : ''
-  return `${prefix}processed ${fresh} invoice(s): ${counts.valid} valid, ${counts.invalid} invalid, ${counts.error} error`
+  return `${prefix}processed ${fresh} invoice(s): ${counts.valid} valid, ${counts.invalid} invalid, ${counts.error} error, ${counts.skipped} skipped`
 }
 
 /**

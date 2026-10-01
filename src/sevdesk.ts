@@ -1,4 +1,4 @@
-import { SevDeskApiError } from './errors.js'
+import { NotAnEInvoiceError, SevDeskApiError } from './errors.js'
 
 /** The invoice fields the worker reads. sevDesk returns many more; they pass through. */
 export interface SevDeskInvoice {
@@ -20,6 +20,7 @@ export interface ListInvoicesParams {
 /** The sevDesk surface the worker depends on. The class satisfies it; tests can inject a fake. */
 export interface SevDesk {
   listInvoices(params: ListInvoicesParams): Promise<SevDeskInvoice[]>
+  /** Throws NotAnEInvoiceError when the invoice has no XML because it is not an e-invoice. */
   getInvoiceXml(id: string): Promise<Uint8Array>
 }
 
@@ -46,6 +47,17 @@ const REQUEST_TIMEOUT_MS = 30_000
 
 /** How much of a sevDesk error body goes into the error message and the log line. */
 const ERROR_BODY_MAX_CHARS = 300
+
+const HTTP_BAD_REQUEST = 400
+
+/**
+ * What sevDesk puts in `error.message`, with a 400, when getXml is asked for an
+ * invoice that was not created as an e-invoice. Its API documentation
+ * (https://api.sevdesk.de/openapi.yaml) lists that 400 as "Invoice was not
+ * found", but an unknown id answers 404. Both recorded from a live account:
+ * test/fixtures/sevdesk/.
+ */
+const NOT_AN_E_INVOICE_MESSAGE = 'This invoice is not an electronic invoice'
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8')
@@ -143,8 +155,19 @@ export class SevDeskClient implements SevDesk {
   }
 
   async getInvoiceXml(id: string): Promise<Uint8Array> {
-    const { text, contentType } = await this.#request('GET', `/Invoice/${encodeURIComponent(id)}/getXml`)
-    return extractXml(contentType, text)
+    try {
+      const { text, contentType } = await this.#request('GET', `/Invoice/${encodeURIComponent(id)}/getXml`)
+      return extractXml(contentType, text)
+    } catch (err) {
+      if (
+        err instanceof SevDeskApiError &&
+        err.status === HTTP_BAD_REQUEST &&
+        err.body.includes(NOT_AN_E_INVOICE_MESSAGE)
+      ) {
+        throw new NotAnEInvoiceError(err.message, err.status, err.body)
+      }
+      throw err
+    }
   }
 
   #parseObjects(text: string): Record<string, unknown>[] {

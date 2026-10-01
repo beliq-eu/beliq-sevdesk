@@ -16,3 +16,11 @@ export class SevDeskApiError extends Error {
     this.body = body
   }
 }
+
+/** sevDesk has no XML for this invoice: it was not created as an e-invoice. Nothing to validate or convert. */
+export class NotAnEInvoiceError extends SevDeskApiError {
+  constructor(message: string, status: number, body = '') {
+    super(message, status, body)
+    this.name = 'NotAnEInvoiceError'
+  }
+}

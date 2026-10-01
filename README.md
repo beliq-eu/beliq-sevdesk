@@ -71,6 +71,20 @@ counts as `error`, unless validation already found it `invalid`. The log line
 An invoice that was still a draft while a newer one was processed is picked up
 on the first poll that lists it.
 
+sevDesk holds XML only for invoices created as e-invoices, and its invoice list
+does not say which ones those are. So the worker asks for the XML of every listed
+invoice. For a normal invoice sevDesk answers that it is not an electronic
+invoice; the worker counts it as `skipped`, logs `invoice.skipped` once and does
+not ask again. A skipped invoice does not change the exit code.
+
+### Which invoices are listed
+
+Each poll lists the invoices in the configured status whose invoice date lies
+within the last `SEVDESK_POLL_WINDOW_DAYS` days (default 30). sevDesk filters on
+the invoice date, not on when the invoice was created or opened. An invoice dated
+before the window is not listed, even when it was created today. Set
+`SEVDESK_POLL_WINDOW_DAYS=0` to list every invoice in that status on every poll.
+
 ## Run once, or as a daemon
 
 - `--once` polls a single time and exits. Use this from cron or CI.
@@ -136,8 +150,8 @@ The body:
 ```json
 {
   "ok": false,
-  "summary": "processed 2 invoice(s): 1 valid, 1 invalid, 0 error",
-  "counts": { "valid": 1, "invalid": 1, "error": 0 },
+  "summary": "processed 2 invoice(s): 1 valid, 1 invalid, 0 error, 0 skipped",
+  "counts": { "valid": 1, "invalid": 1, "error": 0, "skipped": 0 },
   "invoices": [
     { "id": "10", "invoiceNumber": "INV-10", "classification": "valid" },
     { "id": "11", "invoiceNumber": "INV-11", "classification": "invalid" }
@@ -184,7 +198,7 @@ Meaningful with `--once`, so cron and CI can act on the result:
 
 | Code | Meaning |
 |---|---|
-| 0 | every processed invoice was valid, or there was nothing to do |
+| 0 | every processed invoice was valid or skipped, or there was nothing to do |
 | 1 | at least one invoice failed validation |
 | 2 | config / usage error (missing token or key, bad flag or value) |
 | 3 | a sevDesk or beliq API error, an invoice that errored mid-pipeline, or a document beliq refused to validate or convert |

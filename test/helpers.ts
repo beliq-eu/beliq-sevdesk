@@ -1,8 +1,17 @@
 import type { ConvertResult, ValidationResult } from '@beliq/sdk'
 import type { BeliqClient } from '../src/beliq.js'
 import type { SevDesk, SevDeskInvoice } from '../src/sevdesk.js'
-import { SevDeskApiError } from '../src/errors.js'
+import { readFileSync } from 'node:fs'
+import { NotAnEInvoiceError, SevDeskApiError } from '../src/errors.js'
 import type { Logger } from '../src/log.js'
+
+/** One recorded sevDesk answer from test/fixtures/sevdesk/, as the Response sevDesk sent. */
+export function recordedAnswer(name: string): Response {
+  const { status, contentType, body } = JSON.parse(
+    readFileSync(new URL(`./fixtures/sevdesk/${name}.json`, import.meta.url), 'utf8'),
+  )
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': contentType } })
+}
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
@@ -107,6 +116,8 @@ export interface FakeSevdeskOptions {
   xmlFor?: (id: string) => string
   /** Ids whose getInvoiceXml throws (simulates a mid-pipeline failure). */
   failXmlFor?: Set<string>
+  /** Ids sevDesk holds no XML for, because the invoice is not an e-invoice. */
+  notEInvoice?: Set<string>
 }
 
 /** A hand-rolled SevDesk that returns a fixed invoice set and records getXml ids. */
@@ -126,6 +137,7 @@ export function fakeSevdesk(opts: FakeSevdeskOptions): SevDesk & { xmlCalls: str
     getInvoiceXml: async (id) => {
       state.xmlCalls.push(id)
       if (opts.failXmlFor?.has(id)) throw new SevDeskApiError(`getXml boom ${id}`, 500)
+      if (opts.notEInvoice?.has(id)) throw new NotAnEInvoiceError(`getXml ${id}: not an e-invoice`, 400)
       return enc.encode(opts.xmlFor ? opts.xmlFor(id) : `<invoice id="${id}"/>`)
     },
   }
@@ -174,6 +186,8 @@ export function recordingFetch(opts: { status?: number; throwErr?: Error } = {})
 export function sevdeskFetch(opts: {
   invoices: FakeInvoice[]
   xmlFor?: (id: string) => string
+  /** Ids that get sevDesk's recorded "not an electronic invoice" answer from getXml. */
+  notEInvoice?: Set<string>
   onRequest?: (url: URL, init: RequestInit | undefined) => void
 }): typeof fetch {
   return (async (input: any, init?: RequestInit) => {
@@ -182,6 +196,7 @@ export function sevdeskFetch(opts: {
     const getXml = url.pathname.match(/\/Invoice\/([^/]+)\/getXml$/)
     if (getXml) {
       const id = decodeURIComponent(getXml[1])
+      if (opts.notEInvoice?.has(id)) return recordedAnswer('getXml-not-an-e-invoice')
       const xml = opts.xmlFor ? opts.xmlFor(id) : `<invoice id="${id}"/>`
       return new Response(JSON.stringify({ objects: { content: xml, base64: false } }), {
         status: 200,
