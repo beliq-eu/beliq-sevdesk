@@ -7,9 +7,12 @@ export class IoError extends Error {}
 /** A non-2xx sevDesk response (after retries) or a response body we could not parse. Maps to EXIT.API. */
 export class SevDeskApiError extends Error {
   readonly status: number
-  constructor(message: string, status: number) {
+  /** What sevDesk sent with a non-2xx answer, cut to a loggable length. Empty when it sent nothing. */
+  readonly body: string
+  constructor(message: string, status: number, body = '') {
     super(message)
     this.name = 'SevDeskApiError'
     this.status = status
+    this.body = body
   }
 }

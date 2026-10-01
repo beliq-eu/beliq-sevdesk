@@ -112,9 +112,26 @@ describe('SevDeskClient retry/backoff', () => {
     )
   })
 
-  it('leaves a JSON 404 on the plain status message', async () => {
+  it('carries what sevDesk said in a JSON 404', async () => {
     const fetchImpl = (async () => json({ error: 'no such invoice' }, 404)) as any
-    await expect(client(fetchImpl).listInvoices({})).rejects.toThrow(/failed with status 404$/)
+    const err = await client(fetchImpl).listInvoices({}).catch((e) => e)
+    expect(err).toBeInstanceOf(SevDeskApiError)
+    expect(err.message).toBe('sevDesk GET /Invoice failed with status 404: {"error":"no such invoice"}')
+    expect(err.body).toBe('{"error":"no such invoice"}')
+  })
+
+  it('keeps the plain status message when sevDesk sends no body', async () => {
+    const fetchImpl = (async () => new Response('', { status: 400 })) as any
+    const err = await client(fetchImpl).listInvoices({}).catch((e) => e)
+    expect(err.message).toBe('sevDesk GET /Invoice failed with status 400')
+    expect(err.body).toBe('')
+  })
+
+  it('cuts a long error body to 300 characters', async () => {
+    const fetchImpl = (async () => new Response('x'.repeat(5000), { status: 400 })) as any
+    const err = await client(fetchImpl).listInvoices({}).catch((e) => e)
+    expect(err.body).toBe('x'.repeat(300))
+    expect(err.message).toBe(`sevDesk GET /Invoice failed with status 400: ${'x'.repeat(300)}`)
   })
 })
 

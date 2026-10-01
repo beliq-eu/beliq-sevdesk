@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm, readdir, readFile } from 'node:fs/promises'
+import { mkdtemp, rm, readdir, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Config } from '../src/config.js'
@@ -61,12 +61,12 @@ async function outFiles(): Promise<string[]> {
   }
 }
 
-async function readState(): Promise<{ lastInvoiceId: number; lastPolledAt?: string }> {
+async function readState(): Promise<{ processedIds: string[]; lastInvoiceId?: number; lastPolledAt?: string }> {
   return JSON.parse(await readFile(join(dir, 'state.json'), 'utf8'))
 }
 
 describe('pollOnce pipeline', () => {
-  it('processes fresh invoices, writes converted files, advances the mark', async () => {
+  it('processes fresh invoices, writes converted files, records them as processed', async () => {
     const sd = fakeSevdesk({ invoices: [{ id: '11', invoiceNumber: 'INV-11' }, { id: '10', invoiceNumber: 'INV-10' }] })
     const { client, calls } = fakeBeliq()
     const { log } = recordingLogger()
@@ -74,17 +74,19 @@ describe('pollOnce pipeline', () => {
     const res = await pollOnce(baseConfig(), { sevdesk: sd, beliq: client, log, now: () => FIXED_NOW })
 
     expect(res.counts).toEqual({ valid: 2, invalid: 0, error: 0 })
-    expect(res.processedTo).toBe(11)
     // Converted files, named by invoice number + target, written to the output dir.
     expect(await outFiles()).toEqual(['INV-10-ubl.xml', 'INV-11-ubl.xml'])
     expect(dec.decode(await readFile(join(dir, 'out', 'INV-11-ubl.xml')))).toContain('target="ubl"')
-    // State persisted at the high-water-mark.
     const state = await readState()
-    expect(state.lastInvoiceId).toBe(11)
+    expect(state.processedIds).toEqual(['10', '11'])
     expect(state.lastPolledAt).toBe(new Date(FIXED_NOW).toISOString())
-    // One convert + one validate per invoice.
-    expect(calls.filter((c) => c.method === 'convert')).toHaveLength(2)
-    expect(calls.filter((c) => c.method === 'validate')).toHaveLength(2)
+    // Per invoice in id order: the verdict first, then the conversion.
+    expect(calls.map((c) => `${c.method}:${c.doc}`)).toEqual([
+      'validate:<invoice id="10"/>',
+      'convert:<invoice id="10"/>',
+      'validate:<invoice id="11"/>',
+      'convert:<invoice id="11"/>',
+    ])
   })
 
   it('dedupes: a second poll against the same state processes nothing new', async () => {
@@ -101,10 +103,10 @@ describe('pollOnce pipeline', () => {
     expect(res.counts).toEqual({ valid: 0, invalid: 0, error: 0 })
     expect(second.xmlCalls).toEqual([])
     expect(b2.calls).toHaveLength(0)
-    expect((await readState()).lastInvoiceId).toBe(11)
+    expect((await readState()).processedIds).toEqual(['10', '11'])
   })
 
-  it('classifies an invalid document but still advances past it', async () => {
+  it('classifies an invalid document and does not ask about it again', async () => {
     const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }] })
     const { client } = fakeBeliq({
       validate: (doc) => (dec.decode(doc).includes('id="11"') ? invalidResult() : validResult()),
@@ -112,23 +114,69 @@ describe('pollOnce pipeline', () => {
     const res = await pollOnce(baseConfig(), { sevdesk: sd, beliq: client, log: recordingLogger().log, now: () => FIXED_NOW })
 
     expect(res.counts).toEqual({ valid: 1, invalid: 1, error: 0 })
-    expect((await readState()).lastInvoiceId).toBe(11)
+    expect((await readState()).processedIds).toEqual(['10', '11'])
   })
 
-  it('an errored invoice blocks the mark so it (and later ones) are retried', async () => {
-    const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }, { id: '12' }], failXmlFor: new Set(['11']) })
-    const { client } = fakeBeliq()
+  it('an errored invoice is retried next poll and does not hold back the ones after it', async () => {
+    const invoices = [{ id: '10' }, { id: '11' }, { id: '12' }]
+    const sd = fakeSevdesk({ invoices, failXmlFor: new Set(['11']) })
     const { log, eventsNamed } = recordingLogger()
 
-    const res = await pollOnce(baseConfig(), { sevdesk: sd, beliq: client, log, now: () => FIXED_NOW })
+    const res = await pollOnce(baseConfig(), { sevdesk: sd, beliq: fakeBeliq().client, log, now: () => FIXED_NOW })
 
-    // 10 and 12 got verdicts; 11 errored.
     expect(res.counts).toEqual({ valid: 2, invalid: 0, error: 1 })
-    expect(sd.xmlCalls.sort()).toEqual(['10', '11', '12'])
-    // Mark stops before the first error, so 11 and 12 come back next poll.
-    expect(res.processedTo).toBe(10)
-    expect((await readState()).lastInvoiceId).toBe(10)
+    expect((await readState()).processedIds).toEqual(['10', '12'])
     expect(eventsNamed('invoice.error')).toHaveLength(1)
+
+    const second = fakeSevdesk({ invoices })
+    const again = await pollOnce(baseConfig(), {
+      sevdesk: second,
+      beliq: fakeBeliq().client,
+      log: recordingLogger().log,
+      now: () => FIXED_NOW,
+    })
+    expect(second.xmlCalls).toEqual(['11'])
+    expect(again.counts).toEqual({ valid: 1, invalid: 0, error: 0 })
+    expect((await readState()).processedIds).toEqual(['10', '11', '12'])
+  })
+
+  it('processes a draft that is opened after a later invoice was processed', async () => {
+    const cfg = baseConfig()
+    // Invoice 10 exists as a draft, so the Open listing does not show it yet.
+    const first = fakeSevdesk({ invoices: [{ id: '11' }] })
+    await pollOnce(cfg, { sevdesk: first, beliq: fakeBeliq().client, log: recordingLogger().log, now: () => FIXED_NOW })
+
+    const second = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }] })
+    const res = await pollOnce(cfg, {
+      sevdesk: second,
+      beliq: fakeBeliq().client,
+      log: recordingLogger().log,
+      now: () => FIXED_NOW,
+    })
+
+    expect(second.xmlCalls).toEqual(['10'])
+    expect(res.counts).toEqual({ valid: 1, invalid: 0, error: 0 })
+  })
+
+  it('keeps processed ids that a later, shorter listing leaves out', async () => {
+    const cfg = baseConfig()
+    const all = [{ id: '10' }, { id: '11' }]
+    await pollOnce(cfg, { sevdesk: fakeSevdesk({ invoices: all }), beliq: fakeBeliq().client, log: recordingLogger().log })
+    await pollOnce(cfg, { sevdesk: fakeSevdesk({ invoices: [] }), beliq: fakeBeliq().client, log: recordingLogger().log })
+
+    const third = fakeSevdesk({ invoices: all })
+    const res = await pollOnce(cfg, { sevdesk: third, beliq: fakeBeliq().client, log: recordingLogger().log })
+
+    expect(third.xmlCalls).toEqual([])
+    expect(res.counts).toEqual({ valid: 0, invalid: 0, error: 0 })
+  })
+
+  it('processes an invoice once when two pages return it', async () => {
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }, { id: '10' }] })
+    const res = await pollOnce(baseConfig(), { sevdesk: sd, beliq: fakeBeliq().client, log: recordingLogger().log })
+
+    expect(sd.xmlCalls).toEqual(['10', '11'])
+    expect(res.counts).toEqual({ valid: 2, invalid: 0, error: 0 })
   })
 
   it('runs validation-only when no target formats are configured', async () => {
@@ -309,6 +357,57 @@ describe('runWorker with the real SevDeskClient (injected fetch)', () => {
     })
     expect(code).toBe(EXIT.OK)
     expect(await outFiles()).toEqual(['1-ubl.xml', '2-ubl.xml', '3-ubl.xml'])
-    expect((await readState()).lastInvoiceId).toBe(3)
+    expect((await readState()).processedIds).toEqual(['1', '2', '3'])
+  })
+})
+
+describe('a state file written before 0.3.0', () => {
+  const writeLegacy = (lastInvoiceId: number) =>
+    writeFile(join(dir, 'state.json'), JSON.stringify({ lastInvoiceId, lastPolledAt: '2026-09-01T00:00:00.000Z' }))
+
+  it('counts listed invoices at or below the mark as processed and rewrites the file', async () => {
+    await writeLegacy(11)
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }, { id: '12' }] })
+
+    const res = await pollOnce(baseConfig(), { sevdesk: sd, beliq: fakeBeliq().client, log: recordingLogger().log, now: () => FIXED_NOW })
+
+    expect(sd.xmlCalls).toEqual(['12'])
+    expect(res.counts).toEqual({ valid: 1, invalid: 0, error: 0 })
+    const state = await readState()
+    expect(state.processedIds).toEqual(['10', '11', '12'])
+    expect(state.lastInvoiceId).toBeUndefined()
+  })
+
+  it('rewrites the file even when the first poll finds nothing new', async () => {
+    await writeLegacy(11)
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }] })
+
+    await pollOnce(baseConfig(), { sevdesk: sd, beliq: fakeBeliq().client, log: recordingLogger().log, now: () => FIXED_NOW })
+
+    expect(sd.xmlCalls).toEqual([])
+    const state = await readState()
+    expect(state.processedIds).toEqual(['10', '11'])
+    expect(state.lastInvoiceId).toBeUndefined()
+  })
+
+  it('after the migration, processes a lower id that was not listed at the time', async () => {
+    await writeLegacy(11)
+    const cfg = baseConfig()
+    await pollOnce(cfg, { sevdesk: fakeSevdesk({ invoices: [{ id: '11' }] }), beliq: fakeBeliq().client, log: recordingLogger().log })
+
+    const second = fakeSevdesk({ invoices: [{ id: '9' }, { id: '11' }] })
+    await pollOnce(cfg, { sevdesk: second, beliq: fakeBeliq().client, log: recordingLogger().log })
+
+    expect(second.xmlCalls).toEqual(['9'])
+  })
+
+  it('a dry run applies the mark but leaves the file as it was', async () => {
+    await writeLegacy(11)
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '12' }] })
+
+    await pollOnce(baseConfig({ dryRun: true }), { sevdesk: sd, beliq: fakeBeliq().client, log: recordingLogger().log })
+
+    expect(sd.xmlCalls).toEqual(['12'])
+    expect((await readState()).lastInvoiceId).toBe(11)
   })
 })

@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Config } from './config.js'
-import type { BeliqClient } from './beliq.js'
+import { isDocumentRefusal, type BeliqClient } from './beliq.js'
 import type { SevDesk, SevDeskInvoice } from './sevdesk.js'
 import type { Logger } from './log.js'
 import { IoError } from './errors.js'
@@ -29,8 +29,12 @@ export interface WorkerDeps {
 
 export interface PollResult {
   counts: Counts
-  /** The high-water-mark after this poll. */
-  processedTo: number
+}
+
+interface InvoiceResult {
+  classification: Classification
+  /** False when a later poll may get a different answer, so the invoice is tried again. */
+  final: boolean
 }
 
 function safeName(inv: SevDeskInvoice): string {
@@ -56,21 +60,57 @@ async function writeOutput(dir: string, name: string, bytes: Uint8Array): Promis
 }
 
 /**
- * Run one invoice through the pipeline: pull its XML, convert it to each
- * configured target (writing the bytes out), then validate the source document
- * for an independent authority-pinned verdict sevDesk does not provide. Returns
- * the classification; a throw here is caught by the caller and counted as an
- * error (no verdict), leaving the high-water-mark short of this invoice so it is
- * retried next poll.
+ * Run one invoice through the pipeline: pull its XML, validate it for an
+ * independent authority-pinned verdict sevDesk does not provide, then convert it
+ * to each configured target and write the bytes out. Validation runs first so a
+ * conversion beliq refuses cannot cost the verdict.
+ *
+ * A refusal about the document itself is final: the same bytes get the same
+ * answer next poll. Anything else that throws (sevDesk, the network, a spent
+ * quota, a full disk) propagates, and the caller leaves the invoice for the
+ * next poll.
  */
-async function processInvoice(inv: SevDeskInvoice, config: Config, deps: WorkerDeps): Promise<Classification> {
+async function processInvoice(inv: SevDeskInvoice, config: Config, deps: WorkerDeps): Promise<InvoiceResult> {
   const xml = await deps.sevdesk.getInvoiceXml(inv.id)
 
-  for (const target of config.targetFormats) {
-    const result = await deps.beliq.convert(xml, {
-      targetFormat: target,
-      targetProfile: PDF_TARGETS.has(target) ? config.targetProfile : undefined,
+  let valid: boolean
+  try {
+    const verdict = await deps.beliq.validate(xml, {})
+    valid = verdict.valid
+    deps.log.info('validate', {
+      id: inv.id,
+      number: inv.invoiceNumber,
+      valid,
+      errors: verdict.errors?.length ?? 0,
+      warnings: verdict.warnings?.length ?? 0,
+      classification: valid ? 'valid' : 'invalid',
     })
+  } catch (err) {
+    if (!isDocumentRefusal(err)) throw err
+    deps.log.error('validate.refused', {
+      id: inv.id,
+      number: inv.invoiceNumber,
+      status: err.status,
+      code: err.code,
+      message: err.message,
+    })
+    return { classification: 'error', final: true }
+  }
+
+  let refused = false
+  for (const target of config.targetFormats) {
+    let result
+    try {
+      result = await deps.beliq.convert(xml, {
+        targetFormat: target,
+        targetProfile: PDF_TARGETS.has(target) ? config.targetProfile : undefined,
+      })
+    } catch (err) {
+      if (!isDocumentRefusal(err)) throw err
+      refused = true
+      deps.log.error('convert.refused', { id: inv.id, target, status: err.status, code: err.code, message: err.message })
+      continue
+    }
     const ext = PDF_TARGETS.has(target) ? 'pdf' : 'xml'
     const file = `${safeName(inv)}-${target}.${ext}`
     const lostElements = result.meta.lostElementsCount ?? 0
@@ -82,17 +122,10 @@ async function processInvoice(inv: SevDeskInvoice, config: Config, deps: WorkerD
     }
   }
 
-  const verdict = await deps.beliq.validate(xml, {})
-  const classification: Classification = verdict.valid ? 'valid' : 'invalid'
-  deps.log.info('validate', {
-    id: inv.id,
-    number: inv.invoiceNumber,
-    valid: verdict.valid,
-    errors: verdict.errors?.length ?? 0,
-    warnings: verdict.warnings?.length ?? 0,
-    classification,
-  })
-  return classification
+  // An invalid document keeps its verdict. A valid one that beliq would not
+  // convert is an error: the file the operator asked for does not exist.
+  if (!valid) return { classification: 'invalid', final: true }
+  return { classification: refused ? 'error' : 'valid', final: true }
 }
 
 function formatSummary(counts: Counts, fresh: number, dryRun: boolean): string {
@@ -101,12 +134,10 @@ function formatSummary(counts: Counts, fresh: number, dryRun: boolean): string {
 }
 
 /**
- * Poll sevDesk once: fetch invoices in the configured status/window, process
- * only those newer than the high-water-mark (in ascending id order so the mark
- * advances monotonically and dedupes by id), and persist the advanced mark. The
- * mark advances only across the contiguous error-free prefix: an invoice that
- * errors (and every invoice after it in this batch) is left for the next poll,
- * which is safe because reprocessing is idempotent.
+ * Poll sevDesk once: fetch invoices in the configured status/window and process
+ * every one whose id is not yet in the processed set, in ascending id order.
+ * Each invoice stands alone: one that errors is left out of the set and comes
+ * back next poll, and the invoices after it are still processed.
  */
 export async function pollOnce(config: Config, deps: WorkerDeps): Promise<PollResult> {
   const now = deps.now ?? (() => Date.now())
@@ -123,44 +154,53 @@ export async function pollOnce(config: Config, deps: WorkerDeps): Promise<PollRe
     pageSize: config.pageSize,
   })
 
-  const fresh = invoices
-    .map((inv) => ({ inv, idNum: Number(inv.id) }))
-    .filter(({ idNum }) => Number.isFinite(idNum) && idNum > state.lastInvoiceId)
-    .sort((a, b) => a.idNum - b.idNum)
+  const processed = new Set(state.processedIds)
+  const legacyMark = state.legacyLastInvoiceId
+  if (legacyMark !== undefined) {
+    // A pre-0.3.0 state file holds one number. Every listed invoice at or below
+    // it counts as done, which includes drafts the old worker skipped: the mark
+    // cannot tell the two apart.
+    for (const inv of invoices) {
+      if (Number(inv.id) <= legacyMark) processed.add(inv.id)
+    }
+  }
+  const known = processed.size
+
+  // Keyed by id: offset paging can hand back one invoice on two pages.
+  const fresh = [...new Map(invoices.map((inv) => [inv.id, inv])).values()]
+    .filter((inv) => !processed.has(inv.id))
+    .sort((a, b) => Number(a.id) - Number(b.id))
 
   deps.log.info('poll', {
     status: config.status,
-    since: state.lastInvoiceId,
+    known,
     listed: invoices.length,
     fresh: fresh.length,
   })
 
   const counts = emptyCounts()
   const outcomes: InvoiceOutcome[] = []
-  let highWater = state.lastInvoiceId
-  let blocked = false
 
-  for (const { inv, idNum } of fresh) {
-    let classification: Classification
+  for (const inv of fresh) {
+    let result: InvoiceResult
     try {
-      classification = await processInvoice(inv, config, deps)
+      result = await processInvoice(inv, config, deps)
     } catch (err) {
-      classification = 'error'
+      result = { classification: 'error', final: false }
       deps.log.error('invoice.error', {
         id: inv.id,
         number: inv.invoiceNumber,
         message: (err as Error).message,
       })
     }
-    counts[classification]++
-    outcomes.push({ id: inv.id, invoiceNumber: inv.invoiceNumber, classification })
-    if (classification === 'error') blocked = true
-    else if (!blocked) highWater = idNum
+    counts[result.classification]++
+    outcomes.push({ id: inv.id, invoiceNumber: inv.invoiceNumber, classification: result.classification })
+    if (result.final) processed.add(inv.id)
   }
 
-  if (!config.dryRun && highWater > state.lastInvoiceId) {
+  if (!config.dryRun && (processed.size > state.processedIds.size || legacyMark !== undefined)) {
     await saveState(config.stateFile, {
-      lastInvoiceId: highWater,
+      processedIds: processed,
       lastPolledAt: new Date(now()).toISOString(),
     })
   }
@@ -168,7 +208,7 @@ export async function pollOnce(config: Config, deps: WorkerDeps): Promise<PollRe
   const summary = formatSummary(counts, fresh.length, config.dryRun)
   deps.log.summary(summary)
   await maybeNotify(config, deps, counts, outcomes, summary, now)
-  return { counts, processedTo: highWater }
+  return { counts }
 }
 
 /**

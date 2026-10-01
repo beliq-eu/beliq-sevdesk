@@ -17,21 +17,32 @@ afterEach(async () => {
 
 describe('state (real filesystem)', () => {
   it('treats a missing file as the first run', async () => {
-    expect(await loadState(statePath())).toEqual({ lastInvoiceId: 0 })
+    const state = await loadState(statePath())
+    expect([...state.processedIds]).toEqual([])
+    expect(state.legacyLastInvoiceId).toBeUndefined()
   })
 
   it('round-trips through save and load', async () => {
-    await saveState(statePath(), { lastInvoiceId: 42, lastPolledAt: '2026-07-02T00:00:00.000Z' })
+    await saveState(statePath(), { processedIds: new Set(['42', '7']), lastPolledAt: '2026-07-02T00:00:00.000Z' })
     const loaded = await loadState(statePath())
-    expect(loaded.lastInvoiceId).toBe(42)
+    expect([...loaded.processedIds].sort()).toEqual(['42', '7'])
     expect(loaded.lastPolledAt).toBe('2026-07-02T00:00:00.000Z')
+    expect(loaded.legacyLastInvoiceId).toBeUndefined()
   })
 
-  it('writes pretty JSON with a trailing newline', async () => {
-    await saveState(statePath(), { lastInvoiceId: 7 })
+  it('writes pretty JSON, ids in numeric order, with a trailing newline', async () => {
+    await saveState(statePath(), { processedIds: new Set(['100', '9', '20']) })
     const raw = await readFile(statePath(), 'utf8')
     expect(raw.endsWith('}\n')).toBe(true)
-    expect(raw).toContain('"lastInvoiceId": 7')
+    expect(JSON.parse(raw).processedIds).toEqual(['9', '20', '100'])
+  })
+
+  it('reads a pre-0.3.0 file as a legacy mark with nothing processed yet', async () => {
+    await writeFile(statePath(), JSON.stringify({ lastInvoiceId: 42, lastPolledAt: '2026-07-02T00:00:00.000Z' }))
+    const state = await loadState(statePath())
+    expect(state.legacyLastInvoiceId).toBe(42)
+    expect([...state.processedIds]).toEqual([])
+    expect(state.lastPolledAt).toBe('2026-07-02T00:00:00.000Z')
   })
 
   it('throws IoError on corrupt JSON rather than silently resetting', async () => {
@@ -39,8 +50,20 @@ describe('state (real filesystem)', () => {
     await expect(loadState(statePath())).rejects.toBeInstanceOf(IoError)
   })
 
-  it('throws IoError when lastInvoiceId is missing or wrong-typed', async () => {
+  it('throws IoError when the file has neither processedIds nor a legacy mark', async () => {
     await writeFile(statePath(), JSON.stringify({ lastPolledAt: 'x' }))
+    await expect(loadState(statePath())).rejects.toBeInstanceOf(IoError)
+  })
+
+  it('throws IoError when processedIds is not a list of strings', async () => {
+    await writeFile(statePath(), JSON.stringify({ processedIds: [1, 2] }))
+    await expect(loadState(statePath())).rejects.toBeInstanceOf(IoError)
+    await writeFile(statePath(), JSON.stringify({ processedIds: '1,2' }))
+    await expect(loadState(statePath())).rejects.toBeInstanceOf(IoError)
+  })
+
+  it('throws IoError on a truncated file', async () => {
+    await writeFile(statePath(), '{"processedIds": ["1", "2"')
     await expect(loadState(statePath())).rejects.toBeInstanceOf(IoError)
   })
 })

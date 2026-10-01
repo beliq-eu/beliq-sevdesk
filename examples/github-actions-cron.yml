@@ -17,7 +17,7 @@ jobs:
         with:
           node-version: '22'
 
-      # Carry the high-water-mark between runs so invoices are not reprocessed
+      # Carry the state file between runs so invoices are not reprocessed
       # (and failures are not re-notified) every time. The run-id key forces a
       # fresh save each run; restore-keys loads the most recent prior state.
       - uses: actions/cache@v4

@@ -22,7 +22,7 @@ Options:
   --target-format <csv>     beliq convert targets, comma-separated (default: SEVDESK_TARGET_FORMATS)
   --status <s>              Draft | Open | Paid, or a numeric code (default: SEVDESK_INVOICE_STATUS, else Open)
   --poll-window-days <n>    only fetch invoices dated within n days back; 0 disables (default: 30)
-  --state <path>           high-water-mark file (default: SEVDESK_STATE_FILE, else .beliq-sevdesk-state.json)
+  --state <path>           state file, the invoice ids already processed (default: SEVDESK_STATE_FILE, else .beliq-sevdesk-state.json)
   --output <dir>           where converted documents are written (default: SEVDESK_OUTPUT_DIR, else ./out)
   --interval <seconds>     seconds between polls in daemon mode (default: 300)
   --sevdesk-token <token>  sevDesk API token (default: SEVDESK_API_TOKEN)

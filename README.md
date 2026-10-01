@@ -49,19 +49,27 @@ Copy [.env.example](.env.example) to `.env` for the full set of settings.
 
 ## How each invoice is processed
 
-For every invoice newer than the last one it saw (tracked by a persisted
-high-water-mark, so nothing is processed twice):
+For every listed invoice the worker has not finished yet (it keeps the finished
+ids in a state file, so nothing is processed twice):
 
 1. Pull the invoice XML from sevDesk (`GET /Invoice/{id}/getXml`).
-2. Convert it to each configured target format and write the bytes to the output
+2. Validate the document and classify it: `valid`, `invalid`, or `error` (no
+   verdict).
+3. Convert it to each configured target format and write the bytes to the output
    dir as `<invoiceNumber>-<target>.<ext>` (`.pdf` for facturx / zugferd, else
    `.xml`). Any elements a conversion could not carry across are logged.
-3. Validate the source document and classify it: `valid`, `invalid`, or `error`
-   (the pipeline threw before a verdict).
 
-The high-water-mark advances only across a leading run of invoices that got a
-verdict. An invoice that errors (and any after it in the same batch) is left for
-the next poll, which is safe because reprocessing is idempotent.
+Each invoice stands alone. One that fails for a reason that can pass (sevDesk or
+beliq unreachable, a spent quota, a wrong key, a full disk) is tried again on the
+next poll, and the invoices after it are still processed.
+
+If beliq refuses the document itself, because it cannot be read or because the
+conversion is not possible, the invoice is reported once and not tried again. It
+counts as `error`, unless validation already found it `invalid`. The log line
+`validate.refused` or `convert.refused` carries beliq's status and error code.
+
+An invoice that was still a draft while a newer one was processed is picked up
+on the first poll that lists it.
 
 ## Run once, or as a daemon
 
@@ -101,7 +109,7 @@ docker run --rm \
 ```
 
 Inside the image the state file defaults to `/app/state/state.json` and the
-output dir to `/app/out`; mount volumes there to persist the high-water-mark and
+output dir to `/app/out`; mount volumes there to persist the state file and
 the converted documents across restarts. With no arguments the container loops as
 a daemon.
 
@@ -155,7 +163,7 @@ variable.
 | `SEVDESK_TARGET_PROFILE` | | (none) | Factur-X / ZUGFeRD profile, for a facturx / zugferd target. |
 | `SEVDESK_INVOICE_STATUS` | `--status` | `Open` | `Draft`, `Open`, `Paid`, or a numeric code. |
 | `SEVDESK_POLL_WINDOW_DAYS` | `--poll-window-days` | `30` | Only fetch invoices dated within n days back; `0` disables. |
-| `SEVDESK_STATE_FILE` | `--state` | `.beliq-sevdesk-state.json` | The persisted high-water-mark. |
+| `SEVDESK_STATE_FILE` | `--state` | `.beliq-sevdesk-state.json` | The state file: the ids of the invoices already processed. |
 | `SEVDESK_OUTPUT_DIR` | `--output` | `./out` | Where converted documents are written. |
 | `SEVDESK_POLL_INTERVAL_SECONDS` | `--interval` | `300` | Seconds between polls in daemon mode. |
 | `SEVDESK_PAGE_SIZE` | | `100` | Page size for the invoice listing. |
@@ -179,11 +187,24 @@ Meaningful with `--once`, so cron and CI can act on the result:
 | 0 | every processed invoice was valid, or there was nothing to do |
 | 1 | at least one invoice failed validation |
 | 2 | config / usage error (missing token or key, bad flag or value) |
-| 3 | a sevDesk or beliq API error, or an invoice that errored mid-pipeline |
+| 3 | a sevDesk or beliq API error, an invoice that errored mid-pipeline, or a document beliq refused to validate or convert |
 | 4 | I/O error (unreadable state file, unwritable output) |
 
 An error (code 3) outranks an invalid document (code 1): not getting a verdict is
 worse than getting a bad one.
+
+## Upgrading from 0.2.x
+
+0.2.x stored one number in the state file: the highest invoice id it had
+processed. The first poll after the upgrade reads that number, marks every listed
+invoice with an id at or below it as processed, and rewrites the file as a list
+of ids. Nothing needs to be done by hand.
+
+One thing to know. 0.2.x skipped an invoice that was still a draft while a newer
+invoice was processed. The old file cannot tell such an invoice from a processed
+one, so the upgrade marks it as processed too. To have every invoice in the
+current poll window processed again, delete the state file before the first run.
+That validates and converts those invoices again and uses beliq quota for each.
 
 ## Logging
 

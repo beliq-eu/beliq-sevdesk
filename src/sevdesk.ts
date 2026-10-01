@@ -44,6 +44,9 @@ const MAX_PAGES = 100
 /** Per-attempt deadline so a stalled sevDesk connection aborts instead of hanging the poll. */
 const REQUEST_TIMEOUT_MS = 30_000
 
+/** How much of a sevDesk error body goes into the error message and the log line. */
+const ERROR_BODY_MAX_CHARS = 300
+
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8')
 
@@ -173,7 +176,7 @@ export class SevDeskClient implements SevDesk {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), this.#requestTimeoutMs)
       let res: Response
-      let text = ''
+      let text: string
       try {
         res = await this.#fetch(url.toString(), {
           method,
@@ -181,7 +184,7 @@ export class SevDeskClient implements SevDesk {
           signal: controller.signal,
         })
         // Read the body under the same deadline so a stalled stream also aborts.
-        if (res.ok) text = await res.text()
+        text = await res.text()
       } catch (err) {
         lastError = controller.signal.aborted
           ? new Error(`timed out after ${this.#requestTimeoutMs}ms`)
@@ -216,7 +219,12 @@ export class SevDeskClient implements SevDesk {
           res.status,
         )
       }
-      throw new SevDeskApiError(`sevDesk ${method} ${path} failed with status ${res.status}`, res.status)
+      const body = text.trim().slice(0, ERROR_BODY_MAX_CHARS)
+      throw new SevDeskApiError(
+        `sevDesk ${method} ${path} failed with status ${res.status}${body ? `: ${body}` : ''}`,
+        res.status,
+        body,
+      )
     }
     // Unreachable: the loop either returns or throws. Satisfies noImplicitReturns.
     throw new SevDeskApiError(`sevDesk ${method} ${path} exhausted retries`, 0)

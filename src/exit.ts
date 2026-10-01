@@ -11,7 +11,11 @@ export const EXIT = {
   IO: 4,
 } as const
 
-/** Per-invoice outcome. `error` means the pipeline threw before a verdict (network/API/IO). */
+/**
+ * Per-invoice outcome. `error` means there is no usable result: the pipeline
+ * threw before a verdict (network/API/IO), or beliq refused to validate or
+ * convert the document.
+ */
 export type Classification = 'valid' | 'invalid' | 'error'
 
 export interface Counts {
