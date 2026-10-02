@@ -1,18 +1,22 @@
 # beliq-sevdesk
 
 A small, self-hostable worker that polls [sevDesk](https://sevdesk.de) for your
-e-invoices, converts each one to the format a counterparty actually needs, and
-validates it against beliq's authority-pinned, drift-checked rules.
+e-invoices, validates each one against beliq's authority-pinned, drift-checked
+rules, and converts it to the formats a counterparty needs.
 
-sevDesk generates one configured e-invoice format and trusts its own output. This
-worker adds the two things it cannot:
+sevDesk's API hands out an e-invoice as one XML document. On the account this
+worker was tested against in October 2026, that is UN/CEFACT CII declaring the
+XRechnung 3.0 specification. The worker adds two things:
 
-- **Conversion.** sevDesk emits its single configured format. When a counterparty
-  needs a different one (ZUGFeRD to Peppol BIS UBL, or a French Factur-X profile),
-  the worker retargets each invoice with `beliq convert`.
-- **An independent verdict.** `beliq validate` gives an authority-pinned second
-  opinion sevDesk does not provide, catching profile-specific gaps such as BR-DE
-  rules or a missing buyer reference / Leitweg-ID for public buyers.
+- **An independent verdict.** sevDesk checks that the fields an e-invoice needs
+  are filled before the invoice may leave draft: it refuses one without a buyer
+  reference, for example. Its API has no validation endpoint and returns no
+  validation result. `beliq validate` checks the finished document against KoSIT's XRechnung
+  rules. One case from that account: sevDesk took an IBAN that is not a correct
+  IBAN, and beliq reported it as warning `BR-DE-19`.
+- **Conversion.** When a counterparty needs another syntax or profile, the worker
+  converts each invoice with `beliq convert`. See
+  [What you can convert to](#what-you-can-convert-to).
 
 Your **sevDesk token never leaves your environment**: the worker runs where you
 run it, reads invoices directly from sevDesk, and only sends the invoice document
@@ -35,14 +39,14 @@ Set the two credentials, point it at the invoices you care about, and run it onc
 ```bash
 export SEVDESK_API_TOKEN=...   # sevDesk: Settings -> Advanced -> API
 export BELIQ_API_KEY=...       # beliq dashboard -> API Keys
-export SEVDESK_TARGET_FORMATS=peppol-bis
+export SEVDESK_TARGET_FORMATS=xrechnung
 
 beliq-sevdesk --once
 ```
 
-That polls your Open invoices from the last 30 days, converts each to Peppol BIS
-UBL (written to `./out`), validates each one, prints a one-line summary, and exits
-with a code you can gate on. Leave `SEVDESK_TARGET_FORMATS` empty to run
+That polls your Open invoices from the last 30 days, validates each one, converts
+each to XRechnung in UBL syntax (written to `./out`), prints a one-line summary,
+and exits with a code you can gate on. Leave `SEVDESK_TARGET_FORMATS` empty to run
 validation-only (no conversion, no files written).
 
 Copy [.env.example](.env.example) to `.env` for the full set of settings.
@@ -56,8 +60,14 @@ ids in a state file, so nothing is processed twice):
 2. Validate the document and classify it: `valid`, `invalid`, or `error` (no
    verdict).
 3. Convert it to each configured target format and write the bytes to the output
-   dir as `<invoiceNumber>-<target>.<ext>` (`.pdf` for facturx / zugferd, else
-   `.xml`). Any elements a conversion could not carry across are logged.
+   dir as `<invoiceNumber>-<target>.<ext>`. The extension follows what beliq
+   returns: `.xml` for an XML document, `.pdf` for a PDF. Any elements a
+   conversion could not carry across are logged.
+
+The worker validates the document sevDesk produced. It does not validate the
+converted files, and neither does `beliq convert`: a conversion rewrites the
+syntax and the specification id, not the content. Validate a converted file
+yourself before you rely on it.
 
 Each invoice stands alone. One that fails for a reason that can pass (sevDesk or
 beliq unreachable, a spent quota, a wrong key, a full disk) is tried again on the
@@ -71,6 +81,9 @@ counts as `error`, unless validation already found it `invalid`. The log line
 An invoice that was still a draft while a newer one was processed is picked up
 on the first poll that lists it.
 
+Each invoice is checked once. On the tested account sevDesk locks an invoice when
+it is opened, so its document cannot change afterwards.
+
 sevDesk holds XML only for invoices created as e-invoices, and its invoice list
 does not say which ones those are. So the worker asks for the XML of every listed
 invoice. For a normal invoice sevDesk answers that it is not an electronic
@@ -82,8 +95,30 @@ not ask again. A skipped invoice does not change the exit code.
 Each poll lists the invoices in the configured status whose invoice date lies
 within the last `SEVDESK_POLL_WINDOW_DAYS` days (default 30). sevDesk filters on
 the invoice date, not on when the invoice was created or opened. An invoice dated
-before the window is not listed, even when it was created today. Set
-`SEVDESK_POLL_WINDOW_DAYS=0` to list every invoice in that status on every poll.
+before the window is not listed, even when it was created or opened today:
+opening a draft does not move its invoice date. Set `SEVDESK_POLL_WINDOW_DAYS=0`
+to list every invoice in that status on every poll.
+
+An invoice is seen only while it is in the configured status. When a part
+payment is booked on an Open invoice, sevDesk moves it to another status and the
+Open list no longer returns it.
+
+### What you can convert to
+
+Measured with the XML of the tested account. Each of these came back with no lost
+elements:
+
+| Target | What comes back |
+|---|---|
+| `xrechnung` | UBL, declaring XRechnung 3.0 |
+| `ubl` | UBL, declaring plain EN 16931 |
+| `cii` | CII |
+| `zugferd`, `facturx` | CII XML with that profile's specification id. Not a PDF: sevDesk's API gives the worker XML, and beliq builds a PDF only from a PDF source. `SEVDESK_TARGET_PROFILE` picks the profile |
+
+`peppol-bis` does not work. Peppol BIS needs a Peppol endpoint identifier for the
+seller and the buyer, sevDesk's XML carries neither, and beliq does not make one
+up. beliq refuses the conversion (`CONVERSION_LOSSY_FAILCLOSED`) and the invoice
+is reported as `error`.
 
 ## Run once, or as a daemon
 
@@ -96,7 +131,7 @@ before the window is not listed, even when it was created today. Set
 A cron entry that runs it every 15 minutes:
 
 ```cron
-*/15 * * * * SEVDESK_API_TOKEN=... BELIQ_API_KEY=... SEVDESK_TARGET_FORMATS=peppol-bis /usr/bin/beliq-sevdesk --once >> /var/log/beliq-sevdesk.log 2>&1
+*/15 * * * * SEVDESK_API_TOKEN=... BELIQ_API_KEY=... SEVDESK_TARGET_FORMATS=xrechnung /usr/bin/beliq-sevdesk --once >> /var/log/beliq-sevdesk.log 2>&1
 ```
 
 ## Run it in a container
@@ -117,7 +152,7 @@ a single poll:
 
 ```bash
 docker run --rm \
-  -e SEVDESK_API_TOKEN -e BELIQ_API_KEY -e SEVDESK_TARGET_FORMATS=peppol-bis \
+  -e SEVDESK_API_TOKEN -e BELIQ_API_KEY -e SEVDESK_TARGET_FORMATS=xrechnung \
   -v "$PWD/out:/app/out" -v "$PWD/state:/app/state" \
   ghcr.io/beliq-eu/beliq-sevdesk:latest --once
 ```

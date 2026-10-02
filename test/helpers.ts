@@ -7,10 +7,13 @@ import type { Logger } from '../src/log.js'
 
 /** One recorded sevDesk answer from test/fixtures/sevdesk/, as the Response sevDesk sent. */
 export function recordedAnswer(name: string): Response {
-  const { status, contentType, body } = JSON.parse(
-    readFileSync(new URL(`./fixtures/sevdesk/${name}.json`, import.meta.url), 'utf8'),
-  )
+  const { status, contentType, body } = recorded(name)
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': contentType } })
+}
+
+/** The same recorded answer as plain data, for a test that serves it over real HTTP. */
+export function recorded(name: string): { status: number; contentType: string; body: any } {
+  return JSON.parse(readFileSync(new URL(`./fixtures/sevdesk/${name}.json`, import.meta.url), 'utf8'))
 }
 
 const enc = new TextEncoder()
@@ -198,7 +201,7 @@ export function sevdeskFetch(opts: {
       const id = decodeURIComponent(getXml[1])
       if (opts.notEInvoice?.has(id)) return recordedAnswer('getXml-not-an-e-invoice')
       const xml = opts.xmlFor ? opts.xmlFor(id) : `<invoice id="${id}"/>`
-      return new Response(JSON.stringify({ objects: { content: xml, base64: false } }), {
+      return new Response(JSON.stringify({ objects: xml }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       })

@@ -201,6 +201,26 @@ describe('pollOnce pipeline', () => {
     expect(again.counts).toEqual({ valid: 0, invalid: 0, error: 0, skipped: 0 })
   })
 
+  it('names a converted file by what beliq sent back, not by the target', async () => {
+    const enc = new TextEncoder()
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }] })
+    // From an XML source beliq answers a zugferd conversion with XML; a PDF comes
+    // back only for a PDF source.
+    const { client } = fakeBeliq({
+      convert: (_doc, targetFormat) => ({
+        contentType: targetFormat === 'facturx' ? 'application/pdf' : 'application/xml',
+        bytes: enc.encode(targetFormat === 'facturx' ? '%PDF-1.7' : '<cii/>'),
+        meta: { sourceFormat: 'cii', targetFormat, lostElementsCount: 0 },
+      }),
+    })
+    const { log, eventsNamed } = recordingLogger()
+
+    await pollOnce(baseConfig({ targetFormats: ['zugferd', 'facturx'] }), { sevdesk: sd, beliq: client, log })
+
+    expect(await outFiles()).toEqual(['10-facturx.pdf', '10-zugferd.xml'])
+    expect(eventsNamed('convert').map((e) => e.fields?.file)).toEqual(['10-zugferd.xml', '10-facturx.pdf'])
+  })
+
   it('runs validation-only when no target formats are configured', async () => {
     const sd = fakeSevdesk({ invoices: [{ id: '10' }] })
     const { client, calls } = fakeBeliq()

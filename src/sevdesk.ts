@@ -67,12 +67,11 @@ function looksLikeXml(s: string): boolean {
 }
 
 /**
- * Pull the XML out of a getXml response. sevDesk's exact envelope for this
- * endpoint is not publicly pinned (the live round-trip that confirms it is
- * operator-gated), so this handles the documented-plausible shapes in one place:
- * a raw XML body, `{ objects: "<xml>" }`, or `{ objects: { content, base64 } }`,
- * with the payload optionally base64-encoded. If a live response differs, this
- * is the single function to adjust.
+ * Pull the XML out of a getXml response. sevDesk documents the answer as
+ * `{ objects: "<xml>" }` (https://api.sevdesk.de/openapi.yaml), and a live
+ * account answers exactly that: test/fixtures/sevdesk/getXml-e-invoice.json.
+ * The other shapes handled here (a raw XML body, `{ objects: { content, base64 } }`,
+ * a base64 payload) have not been seen from sevDesk.
  */
 export function extractXml(contentType: string, text: string): Uint8Array {
   if (contentType.includes('xml') || looksLikeXml(text)) return encoder.encode(text)

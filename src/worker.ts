@@ -9,8 +9,17 @@ import { emptyCounts, summaryExitCode, type Classification, type Counts } from '
 import { loadState, saveState } from './state.js'
 import { notify, type InvoiceOutcome, type NotifyReport } from './notify.js'
 
-/** Convert targets that produce a hybrid PDF rather than a standalone XML document. */
-const PDF_TARGETS = new Set<string>(['facturx', 'zugferd'])
+/** Convert targets that take a Factur-X / ZUGFeRD profile. */
+const PROFILED_TARGETS = new Set<string>(['facturx', 'zugferd'])
+
+/**
+ * The file extension for what beliq sent back. A conversion to facturx or
+ * zugferd is a PDF only when the source was a hybrid PDF. sevDesk's getXml gives
+ * XML, and from XML beliq returns XML, so the target's name does not decide this.
+ */
+function extensionFor(contentType: string): string {
+  return contentType.includes('pdf') ? 'pdf' : 'xml'
+}
 
 /** Seconds in a day, for the poll-window date filter. */
 const SECONDS_PER_DAY = 86_400
@@ -110,7 +119,7 @@ async function processInvoice(inv: SevDeskInvoice, config: Config, deps: WorkerD
     try {
       result = await deps.beliq.convert(xml, {
         targetFormat: target,
-        targetProfile: PDF_TARGETS.has(target) ? config.targetProfile : undefined,
+        targetProfile: PROFILED_TARGETS.has(target) ? config.targetProfile : undefined,
       })
     } catch (err) {
       if (!isDocumentRefusal(err)) throw err
@@ -118,8 +127,7 @@ async function processInvoice(inv: SevDeskInvoice, config: Config, deps: WorkerD
       deps.log.error('convert.refused', { id: inv.id, target, status: err.status, code: err.code, message: err.message })
       continue
     }
-    const ext = PDF_TARGETS.has(target) ? 'pdf' : 'xml'
-    const file = `${safeName(inv)}-${target}.${ext}`
+    const file = `${safeName(inv)}-${target}.${extensionFor(result.contentType)}`
     const lostElements = result.meta.lostElementsCount ?? 0
     if (config.dryRun) {
       deps.log.info('convert.dryRun', { id: inv.id, target, file, lostElements })
