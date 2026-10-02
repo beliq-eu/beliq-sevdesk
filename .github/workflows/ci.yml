@@ -113,5 +113,5 @@ jobs:
           SEVDESK_API_TOKEN: ${{ secrets.SEVDESK_API_TOKEN }}
         run: npm run test:integration
 
-  public-scrub:
-    uses: beliq-eu/.github/.github/workflows/public-scrub.yml@main
+  guard:
+    uses: beliq-eu/.github/.github/workflows/guard.yml@5e16a1d6d111632323ef4d63e64302a681b501e9 # main
