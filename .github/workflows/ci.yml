@@ -112,3 +112,6 @@ jobs:
           BELIQ_API_KEY: ${{ secrets.BELIQ_API_KEY }}
           SEVDESK_API_TOKEN: ${{ secrets.SEVDESK_API_TOKEN }}
         run: npm run test:integration
+
+  public-scrub:
+    uses: beliq-eu/.github/.github/workflows/public-scrub.yml@main
