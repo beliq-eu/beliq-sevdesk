@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { SevDeskClient, extractXml } from '../src/sevdesk.js'
-import { SevDeskApiError } from '../src/errors.js'
+import { NotAnEInvoiceError, SevDeskApiError } from '../src/errors.js'
+import { recordedAnswer } from './helpers.js'
 
 const noSleep = async () => {}
 const dec = new TextDecoder()
@@ -63,6 +64,20 @@ describe('SevDeskClient.listInvoices', () => {
   })
 })
 
+describe('SevDeskClient page cap', () => {
+  it('fails when the list does not end within the cap, and does not return a part of it', async () => {
+    let calls = 0
+    const fetchImpl = (async () => {
+      calls++
+      return json({ objects: [{ id: calls }] })
+    }) as any
+    await expect(client(fetchImpl).listInvoices({ pageSize: 1 })).rejects.toThrow(
+      /did not end after 100 pages of 1; narrow it with SEVDESK_POLL_WINDOW_DAYS or raise SEVDESK_PAGE_SIZE/,
+    )
+    expect(calls).toBe(100)
+  })
+})
+
 describe('SevDeskClient retry/backoff', () => {
   it('retries a 429 then succeeds', async () => {
     let calls = 0
@@ -112,9 +127,34 @@ describe('SevDeskClient retry/backoff', () => {
     )
   })
 
-  it('leaves a JSON 404 on the plain status message', async () => {
+  it('carries what sevDesk said in a JSON 404', async () => {
     const fetchImpl = (async () => json({ error: 'no such invoice' }, 404)) as any
-    await expect(client(fetchImpl).listInvoices({})).rejects.toThrow(/failed with status 404$/)
+    const err = await client(fetchImpl).listInvoices({}).catch((e) => e)
+    expect(err).toBeInstanceOf(SevDeskApiError)
+    expect(err.message).toBe('sevDesk GET /Invoice failed with status 404: {"error":"no such invoice"}')
+    expect(err.body).toBe('{"error":"no such invoice"}')
+  })
+
+  it('carries what sevDesk said about a wrong token', async () => {
+    const fetchImpl = (async () => recordedAnswer('wrong-token')) as any
+    const err = await client(fetchImpl).listInvoices({}).catch((e) => e)
+    expect(err).toBeInstanceOf(SevDeskApiError)
+    expect(err.status).toBe(401)
+    expect(err.message).toBe('sevDesk GET /Invoice failed with status 401: {"status":401,"message":"Authentication required"}')
+  })
+
+  it('keeps the plain status message when sevDesk sends no body', async () => {
+    const fetchImpl = (async () => new Response('', { status: 400 })) as any
+    const err = await client(fetchImpl).listInvoices({}).catch((e) => e)
+    expect(err.message).toBe('sevDesk GET /Invoice failed with status 400')
+    expect(err.body).toBe('')
+  })
+
+  it('cuts a long error body to 300 characters', async () => {
+    const fetchImpl = (async () => new Response('x'.repeat(5000), { status: 400 })) as any
+    const err = await client(fetchImpl).listInvoices({}).catch((e) => e)
+    expect(err.body).toBe('x'.repeat(300))
+    expect(err.message).toBe(`sevDesk GET /Invoice failed with status 400: ${'x'.repeat(300)}`)
   })
 })
 
@@ -130,6 +170,38 @@ describe('SevDeskClient.getInvoiceXml', () => {
     const fetchImpl = (async () => json({ objects: { content: b64, base64: true } })) as any
     const bytes = await client(fetchImpl).getInvoiceXml('8')
     expect(dec.decode(bytes)).toBe('<invoice id="8"/>')
+  })
+
+  it('reports sevDesk\'s recorded answer for a normal invoice as NotAnEInvoiceError', async () => {
+    const fetchImpl = (async () => recordedAnswer('getXml-not-an-e-invoice')) as any
+    const err = await client(fetchImpl).getInvoiceXml('7').catch((e) => e)
+    expect(err).toBeInstanceOf(NotAnEInvoiceError)
+    expect(err.status).toBe(400)
+    expect(err.message).toContain('This invoice is not an electronic invoice')
+  })
+
+  it('keeps sevDesk\'s recorded answer for an unknown id a plain API error', async () => {
+    const fetchImpl = (async () => recordedAnswer('getXml-unknown-id')) as any
+    const err = await client(fetchImpl).getInvoiceXml('1').catch((e) => e)
+    expect(err).toBeInstanceOf(SevDeskApiError)
+    expect(err).not.toBeInstanceOf(NotAnEInvoiceError)
+    expect(err.status).toBe(404)
+    expect(err.message).toContain('No Model_Invoice with the id 1 was found')
+  })
+
+  it('keeps any other 400 a plain API error', async () => {
+    const fetchImpl = (async () => json({ error: { message: 'Invoice was not found' }, objects: null }, 400)) as any
+    const err = await client(fetchImpl).getInvoiceXml('7').catch((e) => e)
+    expect(err).toBeInstanceOf(SevDeskApiError)
+    expect(err).not.toBeInstanceOf(NotAnEInvoiceError)
+  })
+
+  it('does not take the not-an-e-invoice message for one when the status is not 400', async () => {
+    const fetchImpl = (async () =>
+      json({ error: { message: 'This invoice is not an electronic invoice' }, objects: null }, 403)) as any
+    const err = await client(fetchImpl).getInvoiceXml('7').catch((e) => e)
+    expect(err).toBeInstanceOf(SevDeskApiError)
+    expect(err).not.toBeInstanceOf(NotAnEInvoiceError)
   })
 
   it('encodes the id into the path', async () => {

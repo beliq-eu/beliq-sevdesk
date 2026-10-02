@@ -1,0 +1,15 @@
+{
+  "status": 400,
+  "contentType": "application/json",
+  "body": {
+    "error": {
+      "exceptionUUID": "00000000-0000-0000-0000-000000000000",
+      "message": "This invoice is not an electronic invoice",
+      "errorCode": 0,
+      "code": null,
+      "data": [],
+      "responseCode": 400
+    },
+    "objects": null
+  }
+}

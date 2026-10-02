@@ -10,7 +10,7 @@
 # file at /etc/beliq-sevdesk.env (chmod 600, root-owned) with at least:
 #   SEVDESK_API_TOKEN=...
 #   BELIQ_API_KEY=...
-#   SEVDESK_TARGET_FORMATS=peppol-bis
+#   SEVDESK_TARGET_FORMATS=xrechnung
 [Unit]
 Description=beliq-sevdesk: validate + convert sevDesk e-invoices via beliq
 After=network-online.target

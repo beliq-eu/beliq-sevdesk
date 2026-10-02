@@ -1,0 +1,8 @@
+{
+  "status": 401,
+  "contentType": "application/json",
+  "body": {
+    "status": 401,
+    "message": "Authentication required"
+  }
+}
