@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rename, writeFile } from 'node:fs/promises'
 import { IoError } from './errors.js'
 
 /** What the worker remembers between polls: which sevDesk invoices are done. */
@@ -58,8 +58,12 @@ export async function loadState(path: string): Promise<WorkerState> {
 
 export async function saveState(path: string, state: Pick<WorkerState, 'processedIds' | 'lastPolledAt'>): Promise<void> {
   const processedIds = [...state.processedIds].sort((a, b) => Number(a) - Number(b))
+  // Written beside the target and renamed over it, so a crash mid-write leaves
+  // the previous file whole. A torn state file would stop every later run.
+  const partial = `${path}.tmp`
   try {
-    await writeFile(path, `${JSON.stringify({ processedIds, lastPolledAt: state.lastPolledAt }, null, 2)}\n`)
+    await writeFile(partial, `${JSON.stringify({ processedIds, lastPolledAt: state.lastPolledAt }, null, 2)}\n`)
+    await rename(partial, path)
   } catch (err) {
     throw new IoError(`could not write state file ${path}: ${(err as Error).message}`)
   }

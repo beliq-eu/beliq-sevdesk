@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { loadState, saveState } from '../src/state.js'
@@ -35,6 +35,21 @@ describe('state (real filesystem)', () => {
     const raw = await readFile(statePath(), 'utf8')
     expect(raw.endsWith('}\n')).toBe(true)
     expect(JSON.parse(raw).processedIds).toEqual(['9', '20', '100'])
+  })
+
+  it('leaves no partial file behind', async () => {
+    await saveState(statePath(), { processedIds: new Set(['1']) })
+    expect(await readdir(dir)).toEqual(['state.json'])
+  })
+
+  it('keeps the previous file whole when a write fails', async () => {
+    await saveState(statePath(), { processedIds: new Set(['1']) })
+    // A directory where the partial file goes makes the write fail before the rename.
+    await mkdir(`${statePath()}.tmp`)
+
+    await expect(saveState(statePath(), { processedIds: new Set(['1', '2']) })).rejects.toBeInstanceOf(IoError)
+
+    expect([...(await loadState(statePath())).processedIds]).toEqual(['1'])
   })
 
   it('reads a pre-0.3.0 file as a legacy mark with nothing processed yet', async () => {

@@ -51,6 +51,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
+    "pretest": "npm run build",
     "test": "vitest run --exclude test/integration.test.ts",
     "test:integration": "vitest run test/integration.test.ts",
     "scrub:check": "bash scripts/scrub-check.sh",

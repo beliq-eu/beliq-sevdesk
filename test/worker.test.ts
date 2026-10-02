@@ -7,7 +7,7 @@ import type { SevDesk } from '../src/sevdesk.js'
 import { SevDeskClient } from '../src/sevdesk.js'
 import { pollOnce, runWorker } from '../src/worker.js'
 import { EXIT } from '../src/exit.js'
-import { SevDeskApiError } from '../src/errors.js'
+import { IoError, SevDeskApiError } from '../src/errors.js'
 import {
   fakeBeliq,
   fakeSevdesk,
@@ -390,6 +390,91 @@ describe('runWorker --once exit codes', () => {
     await expect(
       runWorker(baseConfig(), { sevdesk: broken, beliq: fakeBeliq().client, log: recordingLogger().log }),
     ).rejects.toBeInstanceOf(SevDeskApiError)
+  })
+})
+
+describe('runWorker as a daemon', () => {
+  it('logs a poll sevDesk failed and runs the next one', async () => {
+    const stop = new AbortController()
+    let lists = 0
+    const sevdesk: SevDesk = {
+      listInvoices: async () => {
+        lists++
+        if (lists === 1) throw new SevDeskApiError('sevDesk GET /Invoice failed with status 503', 503)
+        return [{ id: '10' }]
+      },
+      getInvoiceXml: async (id) => new TextEncoder().encode(`<invoice id="${id}"/>`),
+    }
+    let sleeps = 0
+    const { log, eventsNamed } = recordingLogger()
+
+    const code = await runWorker(baseConfig({ once: false }), {
+      sevdesk,
+      beliq: fakeBeliq().client,
+      log,
+      now: () => FIXED_NOW,
+      stop: stop.signal,
+      sleep: async () => {
+        sleeps++
+        if (sleeps === 2) stop.abort()
+      },
+    })
+
+    expect(code).toBe(EXIT.OK)
+    expect(lists).toBe(2)
+    expect(eventsNamed('poll.error').map((e) => e.fields)).toEqual([
+      { status: 503, message: 'sevDesk GET /Invoice failed with status 503' },
+    ])
+    expect((await readState()).processedIds).toEqual(['10'])
+  })
+
+  it('ends on a local fault that polling again cannot fix', async () => {
+    await writeFile(join(dir, 'state.json'), 'not json{')
+    await expect(
+      runWorker(baseConfig({ once: false }), {
+        sevdesk: fakeSevdesk({ invoices: [{ id: '10' }] }),
+        beliq: fakeBeliq().client,
+        log: recordingLogger().log,
+        sleep: async () => {},
+      }),
+    ).rejects.toBeInstanceOf(IoError)
+  })
+
+  it('wakes from the wait between polls when told to stop', async () => {
+    const stop = new AbortController()
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }] })
+    setTimeout(() => stop.abort(), 20)
+
+    const code = await runWorker(baseConfig({ once: false, intervalSeconds: 3600 }), {
+      sevdesk: sd,
+      beliq: fakeBeliq().client,
+      log: recordingLogger().log,
+      stop: stop.signal,
+    })
+
+    expect(code).toBe(EXIT.OK)
+    expect(sd.listCalls).toBe(1)
+  })
+
+  it('told to stop mid-poll, finishes the invoice in hand, saves it and leaves the rest', async () => {
+    const stop = new AbortController()
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }] })
+    const { client } = fakeBeliq({
+      validate: () => {
+        stop.abort()
+        return validResult()
+      },
+    })
+    const { log, eventsNamed, summaries } = recordingLogger()
+
+    const code = await runWorker(baseConfig({ once: false }), { sevdesk: sd, beliq: client, log, stop: stop.signal })
+
+    expect(code).toBe(EXIT.OK)
+    expect(sd.xmlCalls).toEqual(['10'])
+    expect(await outFiles()).toEqual(['10-ubl.xml'])
+    expect((await readState()).processedIds).toEqual(['10'])
+    expect(eventsNamed('poll.stopped').map((e) => e.fields)).toEqual([{ unprocessed: 1 }])
+    expect(summaries).toEqual(['processed 1 invoice(s): 1 valid, 0 invalid, 0 error, 0 skipped'])
   })
 })
 

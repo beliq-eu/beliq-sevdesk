@@ -13,9 +13,15 @@ import type { Logger } from './log.js'
  * The entry: parse argv, handle --help / --version, resolve config, build the
  * real sevDesk + beliq clients, run the worker, and map every error class to its
  * exit code (see EXIT). Pure in its logger + env seams so it can be driven from a
- * test without touching real streams. Returns the process exit code.
+ * test without touching real streams. Returns the process exit code. Aborting
+ * `stop` ends the worker after the invoice in hand.
  */
-export async function main(argv: string[], log: Logger, env: NodeJS.ProcessEnv = process.env): Promise<number> {
+export async function main(
+  argv: string[],
+  log: Logger,
+  env: NodeJS.ProcessEnv = process.env,
+  stop?: AbortSignal,
+): Promise<number> {
   let config
   try {
     const args = parseArgs(argv)
@@ -43,7 +49,7 @@ export async function main(argv: string[], log: Logger, env: NodeJS.ProcessEnv =
       maxRetries: config.maxRetries,
     })
     const beliq = makeBeliqClient(config)
-    return await runWorker(config, { sevdesk, beliq, log })
+    return await runWorker(config, { sevdesk, beliq, log, stop })
   } catch (err) {
     if (err instanceof ConfigError) {
       log.error('usage', { message: err.message })

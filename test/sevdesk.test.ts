@@ -64,6 +64,20 @@ describe('SevDeskClient.listInvoices', () => {
   })
 })
 
+describe('SevDeskClient page cap', () => {
+  it('fails when the list does not end within the cap, and does not return a part of it', async () => {
+    let calls = 0
+    const fetchImpl = (async () => {
+      calls++
+      return json({ objects: [{ id: calls }] })
+    }) as any
+    await expect(client(fetchImpl).listInvoices({ pageSize: 1 })).rejects.toThrow(
+      /did not end after 100 pages of 1; narrow it with SEVDESK_POLL_WINDOW_DAYS or raise SEVDESK_PAGE_SIZE/,
+    )
+    expect(calls).toBe(100)
+  })
+})
+
 describe('SevDeskClient retry/backoff', () => {
   it('retries a 429 then succeeds', async () => {
     let calls = 0

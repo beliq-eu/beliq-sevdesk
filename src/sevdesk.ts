@@ -148,9 +148,15 @@ export class SevDeskClient implements SevDesk {
       const { text } = await this.#request('GET', '/Invoice', query)
       const objects = this.#parseObjects(text)
       for (const o of objects) all.push(normalizeInvoice(o))
-      if (objects.length < limit) break
+      if (objects.length < limit) return all
     }
-    return all
+    // Returning what was read so far would leave the invoices beyond the cap
+    // unprocessed with nothing to show for it.
+    throw new SevDeskApiError(
+      `sevDesk invoice list did not end after ${MAX_PAGES} pages of ${limit}; ` +
+        'narrow it with SEVDESK_POLL_WINDOW_DAYS or raise SEVDESK_PAGE_SIZE',
+      200,
+    )
   }
 
   async getInvoiceXml(id: string): Promise<Uint8Array> {

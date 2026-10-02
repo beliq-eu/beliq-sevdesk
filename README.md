@@ -124,14 +124,28 @@ is reported as `error`.
 
 - `--once` polls a single time and exits. Use this from cron or CI.
 - With no `--once`, it loops, polling every `SEVDESK_POLL_INTERVAL_SECONDS`
-  (default 300) until the process is stopped.
+  (default 300) until the process is stopped. A poll that sevDesk fails
+  (unreachable, or an error answer after the retries) is logged as `poll.error`
+  and the next poll runs on schedule. A local fault, such as an unreadable state
+  file, ends the worker with exit code 4.
+- On SIGTERM or SIGINT the worker finishes the invoice it is working on, saves
+  its state and exits 0. Invoices it had not reached are picked up by the next
+  run.
 - `--dry-run` walks the full pipeline (real API calls, real verdicts) but writes
   no files and persists no state. Good for a first, safe look.
 
-A cron entry that runs it every 15 minutes:
+A cron entry that runs it every 15 minutes. The settings come from a file only
+root can read, because cron writes each command line it runs to the system log:
 
 ```cron
-*/15 * * * * SEVDESK_API_TOKEN=... BELIQ_API_KEY=... SEVDESK_TARGET_FORMATS=xrechnung /usr/bin/beliq-sevdesk --once >> /var/log/beliq-sevdesk.log 2>&1
+*/15 * * * * set -a; . /etc/beliq-sevdesk.env; set +a; /usr/bin/beliq-sevdesk --once >> /var/log/beliq-sevdesk.log 2>&1
+```
+
+```bash
+# /etc/beliq-sevdesk.env, mode 600
+SEVDESK_API_TOKEN=...
+BELIQ_API_KEY=...
+SEVDESK_TARGET_FORMATS=xrechnung
 ```
 
 ## Run it in a container
@@ -202,7 +216,9 @@ The exit code always reflects the invoices, not the notification.
 ## Configuration
 
 Every setting is read from the environment; the flags below override the matching
-variable.
+variable. Pass the two credentials through the environment: a value given with
+`--sevdesk-token` or `--api-key` is on the command line, where every user on the
+host can read it in the process list.
 
 | Variable | Flag | Default | Description |
 |---|---|---|---|

@@ -4,8 +4,8 @@ import type { Config } from './config.js'
 import { isDocumentRefusal, type BeliqClient } from './beliq.js'
 import type { SevDesk, SevDeskInvoice } from './sevdesk.js'
 import type { Logger } from './log.js'
-import { IoError, NotAnEInvoiceError } from './errors.js'
-import { emptyCounts, summaryExitCode, type Classification, type Counts } from './exit.js'
+import { IoError, NotAnEInvoiceError, SevDeskApiError } from './errors.js'
+import { EXIT, emptyCounts, summaryExitCode, type Classification, type Counts } from './exit.js'
 import { loadState, saveState } from './state.js'
 import { notify, type InvoiceOutcome, type NotifyReport } from './notify.js'
 
@@ -34,6 +34,8 @@ export interface WorkerDeps {
   sleep?: (ms: number) => Promise<void>
   /** Injectable fetch for the notify webhook (tests). Defaults to global fetch. */
   fetch?: typeof fetch
+  /** Aborted on SIGTERM / SIGINT: finish the invoice in hand, save the state, return. */
+  stop?: AbortSignal
 }
 
 export interface PollResult {
@@ -197,6 +199,10 @@ export async function pollOnce(config: Config, deps: WorkerDeps): Promise<PollRe
   const outcomes: InvoiceOutcome[] = []
 
   for (const inv of fresh) {
+    if (deps.stop?.aborted) {
+      deps.log.info('poll.stopped', { unprocessed: fresh.length - outcomes.length })
+      break
+    }
     let result: InvoiceResult
     try {
       result = await processInvoice(inv, config, deps)
@@ -220,7 +226,7 @@ export async function pollOnce(config: Config, deps: WorkerDeps): Promise<PollRe
     })
   }
 
-  const summary = formatSummary(counts, fresh.length, config.dryRun)
+  const summary = formatSummary(counts, outcomes.length, config.dryRun)
   deps.log.summary(summary)
   await maybeNotify(config, deps, counts, outcomes, summary, now)
   return { counts }
@@ -255,21 +261,45 @@ async function maybeNotify(
   await notify(url, report, { fetch: deps.fetch ?? fetch, log: deps.log })
 }
 
+/** A timer that ends early when the worker is told to stop. */
+function sleepUntilStopped(ms: number, stop?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (stop?.aborted) return resolve()
+    const done = (): void => {
+      clearTimeout(timer)
+      stop?.removeEventListener('abort', done)
+      resolve()
+    }
+    const timer = setTimeout(done, ms)
+    stop?.addEventListener('abort', done, { once: true })
+  })
+}
+
 /**
  * Run the worker. With --once, poll a single time and return the exit code (the
- * CI/cron contract). Otherwise loop forever, polling every interval, until the
- * process is signalled.
+ * CI/cron contract). Otherwise loop, polling every interval, until deps.stop is
+ * aborted. In the loop a poll that sevDesk fails (unreachable, or an error
+ * answer after retries) is logged and the next poll runs on schedule. A local
+ * fault, such as an unreadable state file, still ends the worker: polling again
+ * cannot fix it.
  */
 export async function runWorker(config: Config, deps: WorkerDeps): Promise<number> {
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const sleep = deps.sleep ?? ((ms: number) => sleepUntilStopped(ms, deps.stop))
 
   if (config.once) {
     const { counts } = await pollOnce(config, deps)
     return summaryExitCode(counts)
   }
 
-  for (;;) {
-    await pollOnce(config, deps)
+  while (!deps.stop?.aborted) {
+    try {
+      await pollOnce(config, deps)
+    } catch (err) {
+      if (!(err instanceof SevDeskApiError)) throw err
+      deps.log.error('poll.error', { status: err.status, message: err.message })
+    }
+    if (deps.stop?.aborted) break
     await sleep(config.intervalSeconds * 1000)
   }
+  return EXIT.OK
 }
