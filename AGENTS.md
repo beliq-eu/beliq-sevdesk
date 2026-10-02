@@ -12,7 +12,7 @@ and the shared configuration in `beliq-eu/.github`. These rules bind every chang
 them, whoever or whatever makes it.
 
 <!-- beliq-promise:start -->
-<!-- Generated from beliq-types/PROMISE.md by beliq-types/scripts/promise-block.mjs. Do not edit between the two markers: change PROMISE.md, then rerun the script. -->
+<!-- Generated. Do not edit between the two markers. -->
 ## The beliq promise
 
 **What beliq promises.** For each e-invoice format, beliq checks a document against the highest
@@ -29,9 +29,7 @@ version and a badge for how deep the check goes.
   verdicts.
 - Claim only what the code does today, on every surface: API responses, docs, landing page, legal
   texts, emails, the support bot, connectors, and PR and commit text.
-- Read versions, error codes, statuses and badges from their one source
-  (`beliq-engine/third-party/versions.json`, `beliq-engine/compliance/profile-status.json`,
-  `beliq-types/src/api.ts`, `beliq-types/src/coverage/`). Do not type a copy by hand.
+- Read versions, error codes, statuses and badges from their one source. Do not type a copy by hand.
 
 **The limits, which are part of the promise.**
 
@@ -41,17 +39,13 @@ version and a badge for how deep the check goes.
   authority's own rules), `Community-checked` (real business rules from an independent pack, not
   the authority's own), `Schema-checked` (structure only, no business rules). Never show a
   verdict as deeper than its badge.
-- beliq is a format vendor, not a transmission operator. `beliq-types/docs/transmission-boundary.md`
-  says what it does and does not operate.
-
-The rules behind each line, each with the condition that makes it bind:
-`beliq-types/docs/README.md`.
+- beliq is a format vendor, not a transmission operator.
 <!-- beliq-promise:end -->
 
 ## Reading the promise from this repo
 
-`beliq-engine/` and `beliq-types/` in the block above are beliq's core repos, and they are
-private. From a clone of this repo alone, the public views of the same facts are:
+The one source the block speaks of, for versions, error codes, statuses and badges, is
+readable from a clone of this repo in two places:
 
 - `https://api.beliq.eu/openapi.json`: the fields, enums and error codes the API accepts and
   returns.
@@ -79,10 +73,6 @@ response and an error message are all surfaces in the sense of the promise.
   as the MCP server's tool descriptions and skill: it tells the model to ask the user for
   missing invoice data, not to make it up.
 
-  Code in these repos that predates this rule and fills such a value (an order number used
-  as the buyer reference, a placeholder buyer name, a VAT rate worked out from rounded
-  amounts) is an open defect, not a precedent. Do not copy it and do not add to it.
-
 - **Cite a rule from memory.** Read a rule's ID and text in the authority's own pack before
   writing it into code, a comment, a message or a doc. For XRechnung that pack is KoSIT's
   Schematron, https://github.com/itplr-kosit/xrechnung-schematron. The error this prevents:
@@ -92,11 +82,11 @@ response and an error message are all surfaces in the sense of the promise.
 - **Type a list of formats, standards, profiles or versions from memory.** The option lists in
   these repos (the SDKs' `LIVE_*` constants, the connectors' dropdowns, the MCP server's enums)
   and the versions in sample data are copies. Their source is beliq's coverage manifest,
-  `beliq-types/src/coverage/`, which `GET /v1/rulesets` publishes, and the API's own enums in
-  `openapi.json`. Read a value there before adding or removing it. A value the API accepts but a
-  list leaves out gets its reason written beside it, and the reason has to be true today.
+  which `GET /v1/rulesets` publishes, and the API's own enums in `openapi.json`. Read a value
+  there before adding or removing it. A value the API accepts but a list leaves out gets its
+  reason written beside it, and the reason has to be true today.
 
   Where a list is typed by hand and no CI job compares it with the manifest, that reading is
-  yours to do. A comment that calls FatturaPA, Facturae or e-SLOG "provisional" or "withheld
-  per LPD-1" gives a reason that ended on 2026-07-14, when beliq began to show every format it
+  yours to do. A comment that calls FatturaPA, Facturae or e-SLOG "provisional" or
+  "withheld" gives a reason that ended on 2026-07-14, when beliq began to show every format it
   carries with its badge. Do not repeat it.
