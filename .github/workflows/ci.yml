@@ -29,15 +29,17 @@ jobs:
       - run: npm run scrub:check
 
   # test:integration walks the real pipeline read-only (--once --dry-run): it
-  # lists sevDesk invoices, pulls each one's XML, converts and validates. The
-  # cost is not fixed, because it processes every invoice the poll window
-  # returns, so the preflight asks for a floor rather than an exact count.
+  # lists every Open sevDesk invoice, pulls each one's XML and validates it. It
+  # costs one beliq call per e-invoice in the account, so the preflight asks for
+  # a floor rather than an exact count.
   # BELIQ_API_KEY is a `blq_test_` sandbox key: it runs the full rule stack but
   # draws on the sandbox allowance instead of the plan quota.
   #
-  # SEVDESK_API_TOKEN is not set, so this job reports as skipped rather than
-  # green. That is the honest state: the sevDesk half of the contract is not
-  # verified by CI, and a skipped job says so where a passing one would not.
+  # When SEVDESK_API_TOKEN is absent this job reports as skipped rather than
+  # green. That is the honest state: without a sevDesk account the sevDesk half
+  # of the contract is not verified by CI, and a skipped job says so where a
+  # passing one would not. The offline half is test/contract.test.ts, which
+  # replays answers recorded from a live account.
   preflight:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -56,7 +58,7 @@ jobs:
         run: |
           set -uo pipefail
 
-          # A floor: one poll, plus a convert and a validate for the first invoice.
+          # A floor. The test costs one validate per e-invoice in the account.
           needed=3
 
           if [ -z "${SEVDESK_API_TOKEN:-}" ]; then

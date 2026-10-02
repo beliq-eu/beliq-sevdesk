@@ -5,11 +5,14 @@
 #   docker compose up -d
 #   docker compose logs -f
 #
-# The high-water-mark and converted documents persist in ./state and ./out.
+# The state file and converted documents persist in ./state and ./out.
 services:
   beliq-sevdesk:
     image: ghcr.io/beliq-eu/beliq-sevdesk:latest
     restart: unless-stopped
+    # On `docker compose stop` the worker finishes the invoice it is working on
+    # and saves its state. One invoice can take longer than Docker's default 10 s.
+    stop_grace_period: 1m
     env_file: .env
     environment:
       SEVDESK_POLL_INTERVAL_SECONDS: "300"

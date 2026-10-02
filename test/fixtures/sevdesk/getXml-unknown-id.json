@@ -1,0 +1,15 @@
+{
+  "status": 404,
+  "contentType": "application/json",
+  "body": {
+    "error": {
+      "exceptionUUID": "00000000-0000-0000-0000-000000000000",
+      "message": "No Model_Invoice with the id 1 was found",
+      "errorCode": 0,
+      "code": 151,
+      "data": [],
+      "responseCode": 404
+    },
+    "objects": null
+  }
+}

@@ -1,4 +1,4 @@
-import { SevDeskApiError } from './errors.js'
+import { NotAnEInvoiceError, SevDeskApiError } from './errors.js'
 
 /** The invoice fields the worker reads. sevDesk returns many more; they pass through. */
 export interface SevDeskInvoice {
@@ -20,6 +20,7 @@ export interface ListInvoicesParams {
 /** The sevDesk surface the worker depends on. The class satisfies it; tests can inject a fake. */
 export interface SevDesk {
   listInvoices(params: ListInvoicesParams): Promise<SevDeskInvoice[]>
+  /** Throws NotAnEInvoiceError when the invoice has no XML because it is not an e-invoice. */
   getInvoiceXml(id: string): Promise<Uint8Array>
 }
 
@@ -44,6 +45,20 @@ const MAX_PAGES = 100
 /** Per-attempt deadline so a stalled sevDesk connection aborts instead of hanging the poll. */
 const REQUEST_TIMEOUT_MS = 30_000
 
+/** How much of a sevDesk error body goes into the error message and the log line. */
+const ERROR_BODY_MAX_CHARS = 300
+
+const HTTP_BAD_REQUEST = 400
+
+/**
+ * What sevDesk puts in `error.message`, with a 400, when getXml is asked for an
+ * invoice that was not created as an e-invoice. Its API documentation
+ * (https://api.sevdesk.de/openapi.yaml) lists that 400 as "Invoice was not
+ * found", but an unknown id answers 404. Both recorded from a live account:
+ * test/fixtures/sevdesk/.
+ */
+const NOT_AN_E_INVOICE_MESSAGE = 'This invoice is not an electronic invoice'
+
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8')
 
@@ -52,12 +67,11 @@ function looksLikeXml(s: string): boolean {
 }
 
 /**
- * Pull the XML out of a getXml response. sevDesk's exact envelope for this
- * endpoint is not publicly pinned (the live round-trip that confirms it is
- * operator-gated), so this handles the documented-plausible shapes in one place:
- * a raw XML body, `{ objects: "<xml>" }`, or `{ objects: { content, base64 } }`,
- * with the payload optionally base64-encoded. If a live response differs, this
- * is the single function to adjust.
+ * Pull the XML out of a getXml response. sevDesk documents the answer as
+ * `{ objects: "<xml>" }` (https://api.sevdesk.de/openapi.yaml), and a live
+ * account answers exactly that: test/fixtures/sevdesk/getXml-e-invoice.json.
+ * The other shapes handled here (a raw XML body, `{ objects: { content, base64 } }`,
+ * a base64 payload) have not been seen from sevDesk.
  */
 export function extractXml(contentType: string, text: string): Uint8Array {
   if (contentType.includes('xml') || looksLikeXml(text)) return encoder.encode(text)
@@ -134,14 +148,31 @@ export class SevDeskClient implements SevDesk {
       const { text } = await this.#request('GET', '/Invoice', query)
       const objects = this.#parseObjects(text)
       for (const o of objects) all.push(normalizeInvoice(o))
-      if (objects.length < limit) break
+      if (objects.length < limit) return all
     }
-    return all
+    // Returning what was read so far would leave the invoices beyond the cap
+    // unprocessed with nothing to show for it.
+    throw new SevDeskApiError(
+      `sevDesk invoice list did not end after ${MAX_PAGES} pages of ${limit}; ` +
+        'narrow it with SEVDESK_POLL_WINDOW_DAYS or raise SEVDESK_PAGE_SIZE',
+      200,
+    )
   }
 
   async getInvoiceXml(id: string): Promise<Uint8Array> {
-    const { text, contentType } = await this.#request('GET', `/Invoice/${encodeURIComponent(id)}/getXml`)
-    return extractXml(contentType, text)
+    try {
+      const { text, contentType } = await this.#request('GET', `/Invoice/${encodeURIComponent(id)}/getXml`)
+      return extractXml(contentType, text)
+    } catch (err) {
+      if (
+        err instanceof SevDeskApiError &&
+        err.status === HTTP_BAD_REQUEST &&
+        err.body.includes(NOT_AN_E_INVOICE_MESSAGE)
+      ) {
+        throw new NotAnEInvoiceError(err.message, err.status, err.body)
+      }
+      throw err
+    }
   }
 
   #parseObjects(text: string): Record<string, unknown>[] {
@@ -173,7 +204,7 @@ export class SevDeskClient implements SevDesk {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), this.#requestTimeoutMs)
       let res: Response
-      let text = ''
+      let text: string
       try {
         res = await this.#fetch(url.toString(), {
           method,
@@ -181,7 +212,7 @@ export class SevDeskClient implements SevDesk {
           signal: controller.signal,
         })
         // Read the body under the same deadline so a stalled stream also aborts.
-        if (res.ok) text = await res.text()
+        text = await res.text()
       } catch (err) {
         lastError = controller.signal.aborted
           ? new Error(`timed out after ${this.#requestTimeoutMs}ms`)
@@ -216,7 +247,12 @@ export class SevDeskClient implements SevDesk {
           res.status,
         )
       }
-      throw new SevDeskApiError(`sevDesk ${method} ${path} failed with status ${res.status}`, res.status)
+      const body = text.trim().slice(0, ERROR_BODY_MAX_CHARS)
+      throw new SevDeskApiError(
+        `sevDesk ${method} ${path} failed with status ${res.status}${body ? `: ${body}` : ''}`,
+        res.status,
+        body,
+      )
     }
     // Unreachable: the loop either returns or throws. Satisfies noImplicitReturns.
     throw new SevDeskApiError(`sevDesk ${method} ${path} exhausted retries`, 0)

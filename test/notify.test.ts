@@ -7,8 +7,8 @@ const SECRET_URL = 'https://hooks.example.com/services/SECRET-TOKEN-123'
 function report(over: Partial<NotifyReport> = {}): NotifyReport {
   return {
     ok: false,
-    summary: 'processed 2 invoice(s): 1 valid, 1 invalid, 0 error',
-    counts: { valid: 1, invalid: 1, error: 0 },
+    summary: 'processed 2 invoice(s): 1 valid, 1 invalid, 0 error, 0 skipped',
+    counts: { valid: 1, invalid: 1, error: 0, skipped: 0 },
     invoices: [
       { id: '10', invoiceNumber: 'INV-10', classification: 'valid' },
       { id: '11', invoiceNumber: 'INV-11', classification: 'invalid' },
