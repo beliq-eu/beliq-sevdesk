@@ -116,7 +116,7 @@ jobs:
         run: npm run test:integration
 
   guard:
-    uses: beliq-eu/.github/.github/workflows/guard.yml@5e16a1d6d111632323ef4d63e64302a681b501e9 # main
+    uses: beliq-eu/.github/.github/workflows/guard.yml@f38cc595c598248b3fed00ddec94f8b46c791f97 # main
 
   # Branch protection requires this one check instead of each leg of the `test` matrix, so
   # adding or dropping a version needs no change there. It passes only when every leg passed.
