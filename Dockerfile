@@ -31,7 +31,17 @@ FROM node:22-bookworm-slim AS runner
 # of the image's HIGH/CRITICAL findings, including CVE-2026-59873 in tar), and
 # the worker never runs it. ENTRYPOINT is `node dist/index.js`, and every npm
 # step happens in the builder stage above.
-RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
+# The base image can sit behind the Debian security pocket, so the patched builds
+# are pulled by name. Each is a no-op once the base carries it.
+# perl-base (CVE-2026-8376, -13221, -42496, -42497, -48962, -57432, -57433): fixed
+# in 5.36.0-7+deb12u4.
+# libpcre2-8-0 (CVE-2026-103111): fixed in 10.42-1+deb12u2.
+# The worker runs neither: ENTRYPOINT is node, and its regexes run in V8.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends --only-upgrade perl-base libpcre2-8-0 \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
   && addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 --ingroup nodejs beliq
 
