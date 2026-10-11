@@ -12,7 +12,7 @@ export function recordedAnswer(name: string): Response {
 }
 
 /** The same recorded answer as plain data, for a test that serves it over real HTTP. */
-export function recorded(name: string): { status: number; contentType: string; body: any } {
+export function recorded(name: string): { status: number; contentType: string; body: unknown } {
   return JSON.parse(readFileSync(new URL(`./fixtures/sevdesk/${name}.json`, import.meta.url), 'utf8'))
 }
 
@@ -76,7 +76,7 @@ export interface FakeBeliqOptions {
 export interface RecordedCall {
   method: 'validate' | 'convert'
   doc: string
-  options: any
+  options: Parameters<BeliqClient['validate']>[1] | Parameters<BeliqClient['convert']>[1]
 }
 
 /**
@@ -164,7 +164,7 @@ export function recordingFetch(opts: { status?: number; throwErr?: Error } = {})
   requests: RecordedRequest[]
 } {
   const requests: RecordedRequest[] = []
-  const f = (async (input: any, init?: RequestInit) => {
+  const f = (async (input: string | URL | Request, init?: RequestInit) => {
     const headers: Record<string, string> = {}
     const raw = init?.headers as Record<string, string> | undefined
     if (raw) for (const [k, v] of Object.entries(raw)) headers[k.toLowerCase()] = String(v)
@@ -193,7 +193,7 @@ export function sevdeskFetch(opts: {
   notEInvoice?: Set<string>
   onRequest?: (url: URL, init: RequestInit | undefined) => void
 }): typeof fetch {
-  return (async (input: any, init?: RequestInit) => {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input))
     opts.onRequest?.(url, init)
     const getXml = url.pathname.match(/\/Invoice\/([^/]+)\/getXml$/)

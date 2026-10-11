@@ -24,7 +24,7 @@ function client(fetchImpl: typeof fetch, over: Partial<ConstructorParameters<typ
 
 describe('SevDeskClient.listInvoices', () => {
   it('returns a single page and normalizes ids to strings', async () => {
-    const c = client((async () => json({ objects: [{ id: 5, invoiceNumber: 100, status: 200 }] })) as any)
+    const c = client((async () => json({ objects: [{ id: 5, invoiceNumber: 100, status: 200 }] })))
     const invoices = await c.listInvoices({ status: '200' })
     expect(invoices).toHaveLength(1)
     expect(invoices[0].id).toBe('5')
@@ -35,11 +35,11 @@ describe('SevDeskClient.listInvoices', () => {
   it('sends the token and query params', async () => {
     let seenUrl = ''
     let seenAuth: string | null = null
-    const fetchImpl = (async (url: any, init: any) => {
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
       seenUrl = String(url)
-      seenAuth = new Headers(init.headers).get('authorization')
+      seenAuth = new Headers(init?.headers).get('authorization')
       return json({ objects: [] })
-    }) as any
+    })
     await client(fetchImpl).listInvoices({ status: '200', startDate: 1700000000, pageSize: 50 })
     expect(seenAuth).toBe('tok-123')
     expect(seenUrl).toContain('/Invoice?')
@@ -50,14 +50,14 @@ describe('SevDeskClient.listInvoices', () => {
 
   it('walks pages until a short page ends it', async () => {
     const offsets: number[] = []
-    const fetchImpl = (async (url: any) => {
+    const fetchImpl = (async (url: string | URL | Request) => {
       const u = new URL(String(url))
       const offset = Number(u.searchParams.get('offset'))
       offsets.push(offset)
       // 3 total across a page size of 2: [0,1], [2] -> stop.
       const all = [{ id: 1 }, { id: 2 }, { id: 3 }]
       return json({ objects: all.slice(offset, offset + 2) })
-    }) as any
+    })
     const invoices = await client(fetchImpl).listInvoices({ pageSize: 2 })
     expect(invoices.map((i) => i.id)).toEqual(['1', '2', '3'])
     expect(offsets).toEqual([0, 2])
@@ -70,7 +70,7 @@ describe('SevDeskClient page cap', () => {
     const fetchImpl = (async () => {
       calls++
       return json({ objects: [{ id: calls }] })
-    }) as any
+    })
     await expect(client(fetchImpl).listInvoices({ pageSize: 1 })).rejects.toThrow(
       /did not end after 100 pages of 1; narrow it with SEVDESK_POLL_WINDOW_DAYS or raise SEVDESK_PAGE_SIZE/,
     )
@@ -84,7 +84,7 @@ describe('SevDeskClient retry/backoff', () => {
     const fetchImpl = (async () => {
       calls++
       return calls < 3 ? json({ error: 'rate' }, 429) : json({ objects: [{ id: 9 }] })
-    }) as any
+    })
     const invoices = await client(fetchImpl).listInvoices({})
     expect(calls).toBe(3)
     expect(invoices[0].id).toBe('9')
@@ -95,7 +95,7 @@ describe('SevDeskClient retry/backoff', () => {
     const fetchImpl = (async () => {
       calls++
       return json({ error: 'bad' }, 400)
-    }) as any
+    })
     await expect(client(fetchImpl).listInvoices({})).rejects.toBeInstanceOf(SevDeskApiError)
     expect(calls).toBe(1)
   })
@@ -105,13 +105,13 @@ describe('SevDeskClient retry/backoff', () => {
     const fetchImpl = (async () => {
       calls++
       throw new Error('ECONNRESET')
-    }) as any
+    })
     await expect(client(fetchImpl, { maxRetries: 2 }).listInvoices({})).rejects.toBeInstanceOf(SevDeskApiError)
     expect(calls).toBe(3) // initial + 2 retries
   })
 
   it('throws when the list envelope has no objects array', async () => {
-    const fetchImpl = (async () => json({ nope: true })) as any
+    const fetchImpl = (async () => json({ nope: true }))
     await expect(client(fetchImpl).listInvoices({})).rejects.toBeInstanceOf(SevDeskApiError)
   })
 
@@ -120,7 +120,7 @@ describe('SevDeskClient retry/backoff', () => {
       new Response('<html><title>sevdesk - API</title></html>', {
         status: 404,
         headers: { 'content-type': 'text/html; charset=utf-8' },
-      })) as any
+      }))
     const c = client(fetchImpl, { baseUrl: 'https://api.sevdesk.de/api/v1' })
     await expect(c.listInvoices({})).rejects.toThrow(
       /https:\/\/api\.sevdesk\.de\/api\/v1 is not the REST API.*SEVDESK_BASE_URL/s,
@@ -128,7 +128,7 @@ describe('SevDeskClient retry/backoff', () => {
   })
 
   it('carries what sevDesk said in a JSON 404', async () => {
-    const fetchImpl = (async () => json({ error: 'no such invoice' }, 404)) as any
+    const fetchImpl = (async () => json({ error: 'no such invoice' }, 404))
     const err = await client(fetchImpl).listInvoices({}).catch((e) => e)
     expect(err).toBeInstanceOf(SevDeskApiError)
     expect(err.message).toBe('sevDesk GET /Invoice failed with status 404: {"error":"no such invoice"}')
@@ -136,7 +136,7 @@ describe('SevDeskClient retry/backoff', () => {
   })
 
   it('carries what sevDesk said about a wrong token', async () => {
-    const fetchImpl = (async () => recordedAnswer('wrong-token')) as any
+    const fetchImpl = (async () => recordedAnswer('wrong-token'))
     const err = await client(fetchImpl).listInvoices({}).catch((e) => e)
     expect(err).toBeInstanceOf(SevDeskApiError)
     expect(err.status).toBe(401)
@@ -144,14 +144,14 @@ describe('SevDeskClient retry/backoff', () => {
   })
 
   it('keeps the plain status message when sevDesk sends no body', async () => {
-    const fetchImpl = (async () => new Response('', { status: 400 })) as any
+    const fetchImpl = (async () => new Response('', { status: 400 }))
     const err = await client(fetchImpl).listInvoices({}).catch((e) => e)
     expect(err.message).toBe('sevDesk GET /Invoice failed with status 400')
     expect(err.body).toBe('')
   })
 
   it('cuts a long error body to 300 characters', async () => {
-    const fetchImpl = (async () => new Response('x'.repeat(5000), { status: 400 })) as any
+    const fetchImpl = (async () => new Response('x'.repeat(5000), { status: 400 }))
     const err = await client(fetchImpl).listInvoices({}).catch((e) => e)
     expect(err.body).toBe('x'.repeat(300))
     expect(err.message).toBe(`sevDesk GET /Invoice failed with status 400: ${'x'.repeat(300)}`)
@@ -160,20 +160,20 @@ describe('SevDeskClient retry/backoff', () => {
 
 describe('SevDeskClient.getInvoiceXml', () => {
   it('reads XML from an { objects: { content } } envelope', async () => {
-    const fetchImpl = (async () => json({ objects: { content: '<invoice id="7"/>', base64: false } })) as any
+    const fetchImpl = (async () => json({ objects: { content: '<invoice id="7"/>', base64: false } }))
     const bytes = await client(fetchImpl).getInvoiceXml('7')
     expect(dec.decode(bytes)).toBe('<invoice id="7"/>')
   })
 
   it('decodes a base64 payload', async () => {
     const b64 = Buffer.from('<invoice id="8"/>').toString('base64')
-    const fetchImpl = (async () => json({ objects: { content: b64, base64: true } })) as any
+    const fetchImpl = (async () => json({ objects: { content: b64, base64: true } }))
     const bytes = await client(fetchImpl).getInvoiceXml('8')
     expect(dec.decode(bytes)).toBe('<invoice id="8"/>')
   })
 
   it('reports sevDesk\'s recorded answer for a normal invoice as NotAnEInvoiceError', async () => {
-    const fetchImpl = (async () => recordedAnswer('getXml-not-an-e-invoice')) as any
+    const fetchImpl = (async () => recordedAnswer('getXml-not-an-e-invoice'))
     const err = await client(fetchImpl).getInvoiceXml('7').catch((e) => e)
     expect(err).toBeInstanceOf(NotAnEInvoiceError)
     expect(err.status).toBe(400)
@@ -181,7 +181,7 @@ describe('SevDeskClient.getInvoiceXml', () => {
   })
 
   it('keeps sevDesk\'s recorded answer for an unknown id a plain API error', async () => {
-    const fetchImpl = (async () => recordedAnswer('getXml-unknown-id')) as any
+    const fetchImpl = (async () => recordedAnswer('getXml-unknown-id'))
     const err = await client(fetchImpl).getInvoiceXml('1').catch((e) => e)
     expect(err).toBeInstanceOf(SevDeskApiError)
     expect(err).not.toBeInstanceOf(NotAnEInvoiceError)
@@ -190,7 +190,7 @@ describe('SevDeskClient.getInvoiceXml', () => {
   })
 
   it('keeps any other 400 a plain API error', async () => {
-    const fetchImpl = (async () => json({ error: { message: 'Invoice was not found' }, objects: null }, 400)) as any
+    const fetchImpl = (async () => json({ error: { message: 'Invoice was not found' }, objects: null }, 400))
     const err = await client(fetchImpl).getInvoiceXml('7').catch((e) => e)
     expect(err).toBeInstanceOf(SevDeskApiError)
     expect(err).not.toBeInstanceOf(NotAnEInvoiceError)
@@ -198,7 +198,7 @@ describe('SevDeskClient.getInvoiceXml', () => {
 
   it('does not take the not-an-e-invoice message for one when the status is not 400', async () => {
     const fetchImpl = (async () =>
-      json({ error: { message: 'This invoice is not an electronic invoice' }, objects: null }, 403)) as any
+      json({ error: { message: 'This invoice is not an electronic invoice' }, objects: null }, 403))
     const err = await client(fetchImpl).getInvoiceXml('7').catch((e) => e)
     expect(err).toBeInstanceOf(SevDeskApiError)
     expect(err).not.toBeInstanceOf(NotAnEInvoiceError)
@@ -206,10 +206,10 @@ describe('SevDeskClient.getInvoiceXml', () => {
 
   it('encodes the id into the path', async () => {
     let seen = ''
-    const fetchImpl = (async (url: any) => {
+    const fetchImpl = (async (url: string | URL | Request) => {
       seen = String(url)
       return json({ objects: '<x/>' })
-    }) as any
+    })
     await client(fetchImpl).getInvoiceXml('12 34')
     expect(seen).toContain('/Invoice/12%2034/getXml')
   })

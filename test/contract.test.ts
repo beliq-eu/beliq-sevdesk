@@ -97,7 +97,9 @@ describe('the worker against recorded sevDesk answers', () => {
       '135627293',
     ])
     // beliq is handed the XML exactly as sevDesk sent it inside `objects`.
-    const xml = recorded('getXml-e-invoice').body.objects
+    const { body } = recorded('getXml-e-invoice')
+    const xml = (body as { objects?: unknown }).objects
+    if (typeof xml !== 'string') throw new Error('the recorded getXml answer carries no XML string in objects')
     expect(calls.filter((c) => c.method === 'validate').map((c) => c.doc)).toEqual([xml, xml, xml])
     expect(xml).toMatch(/^<\?xml version="1\.0" encoding="UTF-8"\?>/)
     expect(xml).toContain('urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0')
