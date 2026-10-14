@@ -1,7 +1,7 @@
 # beliq-sevdesk
 
 A small, self-hostable worker that polls [sevDesk](https://sevdesk.de) for your
-e-invoices, validates each one against beliq's authority-pinned, drift-checked
+e-invoices, validates each one against [beliq](https://beliq.eu)'s authority-pinned, drift-checked
 rules, and converts it to the formats a counterparty needs.
 
 sevDesk's API hands out an e-invoice as one XML document. On the account this
