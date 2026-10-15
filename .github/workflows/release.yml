@@ -61,7 +61,7 @@ jobs:
       # npm would use instead of OIDC, so publish would fail with a 404. npm
       # defaults to registry.npmjs.org and uses Trusted Publishing when the
       # token-auth `.npmrc` is absent.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
           # No dependency cache in a publishing job: a poisoned cache would ship.
@@ -71,7 +71,7 @@ jobs:
       # @latest, so a new npm release reaches a publish only through a reviewed bump.
       - name: Upgrade npm
         # renovate: datasource=npm depName=npm
-        run: npm install -g npm@12.0.2
+        run: npm install -g npm@12.2.0
 
       - name: Install dependencies
         run: npm ci
