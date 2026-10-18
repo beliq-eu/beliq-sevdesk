@@ -11,6 +11,13 @@
         "@vitest/**"
       ],
       "allowedVersions": "<5.0.0"
+    },
+    {
+      "description": "Pin both `FROM` lines of the Dockerfile to the digest of their tag (`node:22-bookworm-slim@sha256:...`). A Docker Hub tag is mutable, so on a bare tag a rebuild of the same commit could ship a different base, and no commit recorded which base an image was built on. With the digest pinned, a new base arrives as a digest update inside the shared preset's `before 3am on Monday` (UTC) window, in its patches group, and the preset merges it on green CI. That CI does not build the image: .github/workflows/docker-publish.yml builds it on a version tag only, so a new base is first built with the next release. Apart from the two packages the Dockerfile upgrades by name, the base is the only way a Debian fix reaches the image, so a base fix can wait up to a week for the window, and then for a release. Scoped to the `dockerfile` manager: the shared preset pins digests for GitHub Actions only, and the `:latest` in examples/docker-compose.yml is meant to follow the newest release.",
+      "matchManagers": [
+        "dockerfile"
+      ],
+      "pinDigests": true
     }
   ]
 }
