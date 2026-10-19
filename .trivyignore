@@ -1,0 +1,9 @@
+# Vulnerabilities the image scan in .github/workflows/docker-publish.yml does
+# not block a release on. The scan fails on a CRITICAL vulnerability with a
+# fixed version in the image's Debian or npm packages, unless its ID is listed
+# here. The workflow says what the scan does not see.
+#
+# One ID per line (CVE-..., GHSA-...). Above each, say why the worker cannot
+# reach the vulnerable code, and the date the entry was added. A finding the
+# worker can reach is fixed instead: a package upgrade in the Dockerfile, or a
+# newer base digest.
