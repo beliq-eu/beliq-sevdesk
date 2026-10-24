@@ -1,0 +1,106 @@
+{
+  "valid": true,
+  "format": "cii",
+  "errors": [],
+  "warnings": [
+    {
+      "ruleId": "BR-FR-05_BT-22_PMT",
+      "severity": "warning",
+      "message": "BR-FR-05/BT-22 : La mention relative aux frais de recouvrement (code PMT) est absente. Elle est obligatoire dans les notes (BG-1).",
+      "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:ExchangedDocument[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]"
+    },
+    {
+      "ruleId": "BR-FR-05_BT-22_PMD",
+      "severity": "warning",
+      "message": "BR-FR-05/BT-22 : La mention relative aux pénalités de retard (code PMD) est absente. Elle est obligatoire dans les notes (BG-1).",
+      "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:ExchangedDocument[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]"
+    },
+    {
+      "ruleId": "BR-FR-05_BT-22_AAB",
+      "severity": "warning",
+      "message": "BR-FR-05/BT-22 : La mention relative à l’escompte ou à son absence (code AAB) est absente. Elle est obligatoire dans les notes (BG-1).",
+      "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:ExchangedDocument[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]"
+    },
+    {
+      "ruleId": "BR-FR-10_BT-30",
+      "severity": "warning",
+      "message": "BR-FR-10/BT-30 : Le SIREN du vendeur (ram:ID) est obligatoire et doit être composé exactement de 9 chiffres. Valeur actuelle : \"\".\n        Veuillez renseigner un identifiant SIREN valide.",
+      "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]"
+    },
+    {
+      "ruleId": "BR-FR-12_BT-49",
+      "severity": "warning",
+      "message": "BR-FR-12/BT-49 : Le BT-49  est obligatoire.\n        Valeur actuelle : BT-49=\"\".",
+      "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]"
+    },
+    {
+      "ruleId": "BR-FR-13_BT-34",
+      "severity": "warning",
+      "message": "BR-FR-13/BT-34 : Le BT-34  est obligatoire.\n        Valeur actuelle : BT-34=\"\".",
+      "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]"
+    },
+    {
+      "ruleId": "BR-FR-16_BT-152",
+      "severity": "warning",
+      "message": "BR-FR-16/BT-152 : Le taux de TVA (BT-152) doit être exprimé en pourcentage sans symbole « % » et faire partie des valeurs autorisées. Taux fourni : \"19.00\".",
+      "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:SupplyChainTradeTransaction[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:IncludedSupplyChainTradeLineItem[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]/*:SpecifiedLineTradeSettlement[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]/*:ApplicableTradeTax[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]"
+    },
+    {
+      "ruleId": "BR-FR-16_BT-152",
+      "severity": "warning",
+      "message": "BR-FR-16/BT-152 : Le taux de TVA (BT-152) doit être exprimé en pourcentage sans symbole « % » et faire partie des valeurs autorisées. Taux fourni : \"19.00\".",
+      "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:SupplyChainTradeTransaction[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:IncludedSupplyChainTradeLineItem[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][2]/*:SpecifiedLineTradeSettlement[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]/*:ApplicableTradeTax[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]"
+    },
+    {
+      "ruleId": "BR-FR-16_BT-119",
+      "severity": "warning",
+      "message": "BR-FR-16/BT-119 : Le taux de TVA (BT-119) doit être exprimé en pourcentage sans symbole « % » et faire partie des valeurs autorisées. Taux fourni : \"19.00\".",
+      "location": "/*:CrossIndustryInvoice[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:SupplyChainTradeTransaction[namespace-uri()='urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100'][1]/*:ApplicableHeaderTradeSettlement[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]/*:ApplicableTradeTax[namespace-uri()='urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100'][1]"
+    },
+    {
+      "ruleId": "FRANCE_CTC_FINDINGS_BLOCK_TRANSMISSION",
+      "severity": "info",
+      "message": "A plateforme agréée refuses a document carrying any BR-FR-CTC Flux 2 finding, whatever severity the pack assigns it, so these end the transmission even where `valid` is true: BR-FR-05_BT-22_AAB, BR-FR-05_BT-22_PMD, BR-FR-05_BT-22_PMT, BR-FR-10_BT-30, BR-FR-12_BT-49, BR-FR-13_BT-34, BR-FR-16_BT-119, BR-FR-16_BT-152.",
+      "location": ""
+    }
+  ],
+  "sha256": "b6fa6d36ed6716758b3a36eb124370a1fd5383079aeace300f8c954f38b6eab2",
+  "rulesetSha256": "7b0700c0d6597fe780925cdbe46322fd835aa79bdbfa751db6e7107efe3917af",
+  "rulesetArtifacts": [
+    {
+      "key": "cii_xsd",
+      "version": "D16B",
+      "fileSha256": "b9798aafcba039d0630f0015ffae5092a1758bf924d19d97b6bf0bf9d95f22a0"
+    },
+    {
+      "key": "en16931_cii_schematron",
+      "version": "1.3.16",
+      "fileSha256": "0b234dea2bbfee739b7761e607a992c17fab88773014ef56355b6158cfb1cc53"
+    },
+    {
+      "key": "france_ctc_schematron",
+      "version": "1.3.1",
+      "fileSha256": "ad68ea19171e5b6a166ffcb433b49441ed3e075ee9051cacf0abccc108a9ad9d"
+    }
+  ],
+  "driftCheckedAt": "2026-10-10T11:21:32Z",
+  "verificationTier": "builder-round-trip",
+  "verificationBadge": "authority-verified",
+  "verificationBadgeLabel": "Authority-checked",
+  "schematronVersion": "1.3.16",
+  "franceCtcApplied": true,
+  "franceCtcVersion": "1.3.1",
+  "franceCtcBlockingRuleIds": [
+    "BR-FR-05_BT-22_AAB",
+    "BR-FR-05_BT-22_PMD",
+    "BR-FR-05_BT-22_PMT",
+    "BR-FR-10_BT-30",
+    "BR-FR-12_BT-49",
+    "BR-FR-13_BT-34",
+    "BR-FR-16_BT-119",
+    "BR-FR-16_BT-152"
+  ],
+  "rulesetChannel": "previous",
+  "rulesetFellBack": false,
+  "rulesetSunsetsOn": "2027-05-16"
+}

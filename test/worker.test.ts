@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, readdir, readFile, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Config } from '../src/config.js'
+import type { ValidationResult } from '@beliq/sdk'
 import type { SevDesk } from '../src/sevdesk.js'
 import { SevDeskClient } from '../src/sevdesk.js'
 import { pollOnce, runWorker } from '../src/worker.js'
@@ -20,6 +22,14 @@ import {
 
 const dec = new TextDecoder()
 const FIXED_NOW = 1_750_000_000_000
+
+// An answer of the live API under `Beliq-Ruleset: previous`, recorded on
+// 2026-10-11 and stored as it came: `valid` is true and it carries
+// `franceCtcBlockingRuleIds`.
+const franceResult = (): ValidationResult =>
+  JSON.parse(
+    readFileSync(new URL('./fixtures/beliq/live-validate-france-previous.json', import.meta.url), 'utf8'),
+  ) as ValidationResult
 
 let dir: string
 
@@ -115,6 +125,41 @@ describe('pollOnce pipeline', () => {
 
     expect(res.counts).toEqual({ valid: 1, invalid: 1, error: 0, skipped: 0 })
     expect((await readState()).processedIds).toEqual(['10', '11'])
+  })
+
+  it('logs the check depth the API states, or that it stated none', async () => {
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }] })
+    // The label as the live API sent it, not typed here.
+    const label = franceResult().verificationBadgeLabel
+    expect(label).toBeDefined()
+    const { client } = fakeBeliq({
+      validate: (doc) =>
+        dec.decode(doc).includes('id="11"')
+          ? validResult()
+          : ({ ...validResult(), verificationBadgeLabel: label } as ValidationResult),
+    })
+    const r = recordingLogger()
+    await pollOnce(baseConfig(), { sevdesk: sd, beliq: client, log: r.log, now: () => FIXED_NOW })
+
+    expect(r.eventsNamed('validate').map((e) => e.fields?.checkDepth)).toEqual([label, 'check depth not stated'])
+  })
+
+  it('counts a France CTC block as invalid where the verdict is valid, and logs the block first', async () => {
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }] })
+    const france = franceResult()
+    expect(france.valid).toBe(true)
+    const { client } = fakeBeliq({ validate: () => france })
+    const r = recordingLogger()
+    const res = await pollOnce(baseConfig(), { sevdesk: sd, beliq: client, log: r.log, now: () => FIXED_NOW })
+
+    expect(res.counts).toEqual({ valid: 0, invalid: 1, error: 0, skipped: 0 })
+    const names = r.events.map((e) => e.event)
+    expect(names.indexOf('validate.franceCtcBlock')).toBeGreaterThanOrEqual(0)
+    expect(names.indexOf('validate.franceCtcBlock')).toBeLessThan(names.indexOf('validate'))
+    const block = r.eventsNamed('validate.franceCtcBlock')[0].fields
+    expect(block?.franceCtcBlockingRuleIds).toEqual(france.franceCtcBlockingRuleIds)
+    expect(block?.message).toContain('BR-FR-05_BT-22_AAB')
+    expect(r.eventsNamed('validate')[0].fields).toMatchObject({ valid: true, classification: 'invalid' })
   })
 
   it('an errored invoice is retried next poll and does not hold back the ones after it', async () => {
@@ -372,6 +417,11 @@ describe('runWorker --once exit codes', () => {
 
   it('returns INVALID when a document fails validation', async () => {
     const code = await run(fakeSevdesk({ invoices: [{ id: '1' }] }), baseConfig(), { validate: () => invalidResult() })
+    expect(code).toBe(EXIT.INVALID)
+  })
+
+  it('returns INVALID for a France CTC block on a valid verdict', async () => {
+    const code = await run(fakeSevdesk({ invoices: [{ id: '1' }] }), baseConfig(), { validate: () => franceResult() })
     expect(code).toBe(EXIT.INVALID)
   })
 
