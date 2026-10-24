@@ -129,19 +129,19 @@ describe('pollOnce pipeline', () => {
 
   it('logs the check depth the API states, or that it stated none', async () => {
     const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }] })
+    // The label as the live API sent it, not typed here.
+    const label = franceResult().verificationBadgeLabel
+    expect(label).toBeDefined()
     const { client } = fakeBeliq({
       validate: (doc) =>
         dec.decode(doc).includes('id="11"')
           ? validResult()
-          : ({ ...validResult(), verificationBadgeLabel: 'Authority-checked' } as ValidationResult),
+          : ({ ...validResult(), verificationBadgeLabel: label } as ValidationResult),
     })
     const r = recordingLogger()
     await pollOnce(baseConfig(), { sevdesk: sd, beliq: client, log: r.log, now: () => FIXED_NOW })
 
-    expect(r.eventsNamed('validate').map((e) => e.fields?.checkDepth)).toEqual([
-      'Authority-checked',
-      'check depth not stated',
-    ])
+    expect(r.eventsNamed('validate').map((e) => e.fields?.checkDepth)).toEqual([label, 'check depth not stated'])
   })
 
   it('counts a France CTC block as invalid where the verdict is valid, and logs the block first', async () => {
