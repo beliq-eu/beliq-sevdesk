@@ -66,7 +66,8 @@ ids in a state file, so nothing is processed twice):
    stated` where it states none. An invoice whose result carries
    `franceCtcBlockingRuleIds` counts as `invalid`, also where beliq's verdict is
    valid, and a `validate.franceCtcBlock` line with the ids and beliq's message
-   comes first.
+   comes first. An `invalid` invoice is still converted, and its files are
+   written: the exit code and the log say which invoices failed.
 3. Convert it to each configured target format and write the bytes to the output
    dir as `<invoiceNumber>-<target>.<ext>`. The extension follows what beliq
    returns: `.xml` for an XML document, `.pdf` for a PDF. Any elements a
