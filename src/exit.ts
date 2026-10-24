@@ -1,7 +1,10 @@
 export const EXIT = {
   /** Success: every processed invoice was valid, or there was nothing to do. */
   OK: 0,
-  /** At least one invoice failed validation (the CI/Action "document failed" contract). */
+  /**
+   * At least one invoice failed validation or carries France CTC blocking rule ids
+   * (the CI/Action "document failed" contract).
+   */
   INVALID: 1,
   /** A config or usage problem: missing token/key, bad flag, bad value. */
   USAGE: 2,
@@ -32,7 +35,7 @@ export function emptyCounts(): Counts {
 
 /**
  * The run's exit code from the tallied outcomes. An error (we never got a
- * verdict) is worse than an invalid document (a verdict of non-compliant), so it
+ * verdict) is worse than an invalid document (a verdict we did get), so it
  * wins: EXIT.API > EXIT.INVALID > EXIT.OK. This is a faithful superset of the
  * CLI/Action contract, where "any invoice failed" maps to a non-zero exit. A
  * skipped invoice is not a failure and does not move the exit code.

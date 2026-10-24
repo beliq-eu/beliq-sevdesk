@@ -1,5 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { ValidationResult } from '@beliq/sdk'
+import { checkDepth, franceBlockLines, franceBlockingRuleIds } from '@beliq/sdk/helpers'
 import type { Config } from './config.js'
 import { isDocumentRefusal, type BeliqClient } from './beliq.js'
 import type { SevDesk, SevDeskInvoice } from './sevdesk.js'
@@ -71,8 +73,36 @@ async function writeOutput(dir: string, name: string, bytes: Uint8Array): Promis
 }
 
 /**
+ * Log the verdict and say whether the invoice passed. A France CTC block is
+ * logged first and fails the invoice also where `valid` is true: the API reports
+ * the ids beside `valid` and does not fold them into it.
+ */
+function recordVerdict(inv: SevDeskInvoice, verdict: ValidationResult, log: Logger): boolean {
+  const blockingIds = franceBlockingRuleIds(verdict)
+  const passed = verdict.valid && blockingIds.length === 0
+  if (blockingIds.length > 0) {
+    log.info('validate.franceCtcBlock', {
+      id: inv.id,
+      number: inv.invoiceNumber,
+      franceCtcBlockingRuleIds: blockingIds,
+      message: franceBlockLines(verdict).join(' '),
+    })
+  }
+  log.info('validate', {
+    id: inv.id,
+    number: inv.invoiceNumber,
+    valid: verdict.valid,
+    checkDepth: checkDepth(verdict),
+    errors: verdict.errors?.length ?? 0,
+    warnings: verdict.warnings?.length ?? 0,
+    classification: passed ? 'valid' : 'invalid',
+  })
+  return passed
+}
+
+/**
  * Run one invoice through the pipeline: pull its XML, validate it for an
- * independent authority-pinned verdict sevDesk does not provide, then convert it
+ * independent verdict sevDesk does not provide, then convert it
  * to each configured target and write the bytes out. Validation runs first so a
  * conversion beliq refuses cannot cost the verdict.
  *
@@ -91,18 +121,9 @@ async function processInvoice(inv: SevDeskInvoice, config: Config, deps: WorkerD
     return { classification: 'skipped', final: true }
   }
 
-  let valid: boolean
+  let passed: boolean
   try {
-    const verdict = await deps.beliq.validate(xml, {})
-    valid = verdict.valid
-    deps.log.info('validate', {
-      id: inv.id,
-      number: inv.invoiceNumber,
-      valid,
-      errors: verdict.errors?.length ?? 0,
-      warnings: verdict.warnings?.length ?? 0,
-      classification: valid ? 'valid' : 'invalid',
-    })
+    passed = recordVerdict(inv, await deps.beliq.validate(xml, {}), deps.log)
   } catch (err) {
     if (!isDocumentRefusal(err)) throw err
     deps.log.error('validate.refused', {
@@ -141,7 +162,7 @@ async function processInvoice(inv: SevDeskInvoice, config: Config, deps: WorkerD
 
   // An invalid document keeps its verdict. A valid one that beliq would not
   // convert is an error: the file the operator asked for does not exist.
-  if (!valid) return { classification: 'invalid', final: true }
+  if (!passed) return { classification: 'invalid', final: true }
   return { classification: refused ? 'error' : 'valid', final: true }
 }
 

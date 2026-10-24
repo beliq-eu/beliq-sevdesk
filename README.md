@@ -1,8 +1,10 @@
 # beliq-sevdesk
 
 A small, self-hostable worker that polls [sevDesk](https://sevdesk.de) for your
-e-invoices, validates each one against [beliq](https://beliq.eu)'s authority-pinned, drift-checked
-rules, and converts it to the formats a counterparty needs.
+e-invoices, validates each one with the [beliq](https://beliq.eu) API, and
+converts it to the formats a counterparty needs. Each verdict carries the check
+depth the API states for it; [How verification works](https://docs.beliq.eu/compliance/how-verification-works/)
+explains each depth.
 
 sevDesk's API hands out an e-invoice as one XML document. On the account this
 worker was tested against in October 2026, that is UN/CEFACT CII declaring the
@@ -11,11 +13,12 @@ XRechnung 3.0 specification. The worker adds two things:
 - **An independent verdict.** sevDesk checks that the fields an e-invoice needs
   are filled before the invoice may leave draft: it refuses one without a buyer
   reference, for example. Its API has no validation endpoint and returns no
-  validation result. `beliq validate` checks the finished document against KoSIT's XRechnung
+  validation result. The worker sends the finished document to beliq's validate
+  endpoint through `@beliq/sdk`, which checks it against KoSIT's XRechnung
   rules. One case from that account: sevDesk took an IBAN that is not a correct
   IBAN, and beliq reported it as warning `BR-DE-19`.
 - **Conversion.** When a counterparty needs another syntax or profile, the worker
-  converts each invoice with `beliq convert`. See
+  converts each invoice through beliq's convert endpoint. See
   [What you can convert to](#what-you-can-convert-to).
 
 Your **sevDesk token never leaves your environment**: the worker runs where you
@@ -58,16 +61,25 @@ ids in a state file, so nothing is processed twice):
 
 1. Pull the invoice XML from sevDesk (`GET /Invoice/{id}/getXml`).
 2. Validate the document and classify it: `valid`, `invalid`, or `error` (no
-   verdict).
+   verdict). The `validate` log line carries beliq's `valid` and, in
+   `checkDepth`, the check depth as the API states it, or `check depth not
+   stated` where it states none. An invoice whose result carries
+   `franceCtcBlockingRuleIds` counts as `invalid`, also where beliq's verdict is
+   valid, and a `validate.franceCtcBlock` line with the ids and beliq's message
+   comes first.
 3. Convert it to each configured target format and write the bytes to the output
    dir as `<invoiceNumber>-<target>.<ext>`. The extension follows what beliq
    returns: `.xml` for an XML document, `.pdf` for a PDF. Any elements a
    conversion could not carry across are logged.
 
-The worker validates the document sevDesk produced. It does not validate the
-converted files, and neither does `beliq convert`: a conversion rewrites the
-syntax and the specification id, not the content. Validate a converted file
-yourself before you rely on it.
+The worker validates the document sevDesk produced. beliq validates each
+converted file too, before it returns it: one that fails comes back as
+`CONVERSION_OUTPUT_INVALID`, the log line `convert.refused` names it, and no
+file is written. For a `facturx` or `zugferd` target at profile `en16931` that
+check is the one for plain EN 16931 CII. beliq does not compare the converted
+file with the source field by field, so a field the engine lost without
+recording it is not in the logged count. [The convert reference](https://docs.beliq.eu/api-reference/convert/)
+has the detail.
 
 Each invoice stands alone. One that fails for a reason that can pass (sevDesk or
 beliq unreachable, a spent quota, a wrong key, a full disk) is tried again on the
