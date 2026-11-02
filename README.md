@@ -70,8 +70,9 @@ ids in a state file, so nothing is processed twice):
    written: the exit code and the log say which invoices failed.
 3. Convert it to each configured target format and write the bytes to the output
    dir as `<invoiceNumber>-<target>.<ext>`. The extension follows what beliq
-   returns: `.xml` for an XML document, `.pdf` for a PDF. Any elements a
-   conversion could not carry across are logged.
+   returns: `.xml` for an XML document, `.pdf` for a PDF. The log line gives
+   `lostElements`, how many source elements the engine recorded as having no
+   target equivalent.
 
 The worker validates the document sevDesk produced. beliq validates each
 converted file too, before it returns it: one that fails comes back as
