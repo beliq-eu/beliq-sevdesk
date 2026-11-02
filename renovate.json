@@ -18,6 +18,31 @@
         "dockerfile"
       ],
       "pinDigests": true
+    },
+    {
+      "description": "Auto-merge minor updates too, once the required checks pass. The default branch of this repository carries a required status check set (the guard checks and the repository's own test check), so a green pull request means named checks ran and passed, not that nothing ran. Measured on 2026-11-02 with `GET /repos/{owner}/{repo}/rules/branches/main`; check it again before copying this rule to another repository. The two rules below take exceptions out, so they have to stay below this one.",
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "automerge": true
+    },
+    {
+      "description": "No automerge for a version typed into a workflow's `with:` input (dep type `uses-with`), such as `python-version` or setup-uv's `version`. Renovate files a runtime move like Python 3.12 to 3.15 as `minor`, and the test matrix may not cover the new version yet. A group that holds one of these is left for a person to merge.",
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "matchDepTypes": [
+        "uses-with"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "No automerge for a dependency still below 1.0.0. Under semver a 0.x minor step may break, and Renovate files it as `minor`, for example uv 0.12 to 0.13.",
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "matchCurrentVersion": "<1.0.0",
+      "automerge": false
     }
   ]
 }
