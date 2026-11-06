@@ -52,8 +52,8 @@ COPY --from=builder --chown=beliq:nodejs /build/dist ./dist
 COPY --chown=beliq:nodejs package.json ./
 
 # Default the state file and output dir to mount points the non-root user owns,
-# so `-v host:/app/state` and `-v host:/app/out` persist the high-water-mark and
-# the converted documents across restarts.
+# so `-v host:/app/state` and `-v host:/app/out` persist the ids of the invoices
+# already processed and the converted documents across restarts.
 RUN mkdir -p /app/state /app/out && chown -R beliq:nodejs /app/state /app/out
 
 USER beliq
