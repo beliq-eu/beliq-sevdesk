@@ -171,6 +171,13 @@ Registry:
 docker pull ghcr.io/beliq-eu/beliq-sevdesk:latest
 ```
 
+`latest` and the minor tag of the newest release (such as `0.4`) move: when the
+base image the Dockerfile pins gets a new digest on main, that release is
+rebuilt on it, and when the rebuild passes the image scan both tags point at the
+new build. The exact version tag (such as `0.4.0`) and the `sha-` tag keep the
+bytes they were released with. Pin one of those for an image that never changes
+under you.
+
 The image ships only the compiled worker and `@beliq/sdk` from the public npm
 registry. No private beliq source is in it: all validation and conversion happen
 on the beliq API over HTTPS.
