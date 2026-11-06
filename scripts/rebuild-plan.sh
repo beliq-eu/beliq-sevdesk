@@ -8,6 +8,10 @@
 # base digest into its FROM lines and nothing else, and prints push=true with
 # what the build needs. When they are the same, it prints push=false.
 #
+# Only the last FROM line counts as the base: it is the stage the image ships.
+# The builder stage's layers stay behind, though the splice moves its digest
+# too.
+#
 # Run from a checkout of main with its tags. Output is key=value lines for
 # $GITHUB_OUTPUT. Usage: IMAGE=ghcr.io/beliq-eu/beliq-sevdesk rebuild-plan.sh <dir>
 
@@ -38,15 +42,22 @@ qualified() {
   fi
 }
 
-latest_labels=$(docker buildx imagetools inspect "$image:latest" \
+# Every read of `latest` goes to the one digest it resolves to here.
+latest=$(docker buildx imagetools inspect "$image:latest" --format '{{ .Manifest.Digest }}' 2>&1) ||
+  fail "could not read $image:latest: $latest"
+[[ $latest == sha256:* ]] || fail "$image:latest resolves to '$latest', not a digest"
+
+latest_labels=$(docker buildx imagetools inspect "$image@$latest" \
   --format '{{ json (index .Image "linux/amd64").Config.Labels }}')
 version=$(jq -r '.["org.opencontainers.image.version"] // ""' <<<"$latest_labels")
 revision=$(jq -r '.["org.opencontainers.image.revision"] // ""' <<<"$latest_labels")
 
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
   fail "$image:latest carries no X.Y.Z version label (it reads '$version')"
-docker buildx imagetools inspect "$image:$version" >/dev/null 2>&1 ||
-  fail "$image:latest says $version, and $image:$version does not exist"
+if ! answer=$(docker buildx imagetools inspect "$image:$version" 2>&1 >/dev/null); then
+  [[ $answer == *"not found"* ]] && fail "$image:latest says $version, and $image:$version does not exist"
+  fail "could not read $image:$version: $answer"
+fi
 commit=$(git rev-parse -q --verify "refs/tags/v$version^{commit}") ||
   fail "$image:latest says $version, and there is no tag v$version"
 [[ $commit == "$revision" ]] ||
@@ -73,7 +84,7 @@ base_digest="${base_ref#*@}"
 
 # The base `latest` was built on: the annotation a rebuild writes, or for a
 # release image, which has none, the digest its own tag's Dockerfile pins.
-latest_base=$(docker buildx imagetools inspect "$image:latest" --raw |
+latest_base=$(docker buildx imagetools inspect "$image@$latest" --raw |
   jq -r '.annotations["org.opencontainers.image.base.digest"] // ""')
 if [[ -z $latest_base && ${tag_from[-1]} == *@* ]]; then
   latest_base="${tag_from[-1]#*@}"
@@ -102,7 +113,6 @@ mv "$tree/Dockerfile.rebuild" "$tree/Dockerfile"
 diff <(git show "$commit:Dockerfile" | awk '$1 != "FROM"') <(awk '$1 != "FROM"' "$tree/Dockerfile") >&2 ||
   fail "the splice changed a line other than FROM"
 
-[[ -f "$tree/.trivyignore" ]] || fail "v$version has no .trivyignore, which the scan reads"
 have=$(jq -r .version "$tree/package.json")
 [[ $have == "$version" ]] || fail "v$version's package.json says $have"
 

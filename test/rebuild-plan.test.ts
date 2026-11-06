@@ -4,6 +4,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { createHash } from 'node:crypto'
 
 // scripts/rebuild-plan.sh decides what the rebuild path of docker-publish.yml
 // pushes to `latest`. It runs here as it runs in the workflow: bash, a real git
@@ -18,11 +19,19 @@ const NEW = `sha256:${'b'.repeat(64)}`
 const NEWER = `sha256:${'c'.repeat(64)}`
 
 const FAKE_DOCKER = `#!/usr/bin/env bash
-# docker buildx imagetools inspect <ref> [--format <f> | --raw]
-ref="$4"; tag="\${ref##*:}"
-[ -d "$FAKE_REGISTRY/$tag" ] || { echo "ERROR: $ref: not found" >&2; exit 1; }
+# docker buildx imagetools inspect <name:tag | name@digest> [--format <f> | --raw]
+ref="$4"; tag=""
+if [[ $ref == *@* ]]; then
+  for entry in "$FAKE_REGISTRY"/*/; do
+    [ "$(cat "$entry/digest")" = "\${ref#*@}" ] && tag=$(basename "$entry")
+  done
+else
+  tag="\${ref##*:}"
+fi
+[ -n "$tag" ] && [ -d "$FAKE_REGISTRY/$tag" ] || { echo "ERROR: $ref: not found" >&2; exit 1; }
+[ -e "$FAKE_REGISTRY/$tag/unavailable" ] && { echo "ERROR: unexpected status from HEAD request: 503 Service Unavailable" >&2; exit 1; }
 case "\${5:-}" in
-  --format) cat "$FAKE_REGISTRY/$tag/labels.json" ;;
+  --format) if [ "$6" = '{{ .Manifest.Digest }}' ]; then cat "$FAKE_REGISTRY/$tag/digest"; else cat "$FAKE_REGISTRY/$tag/labels.json"; fi ;;
   --raw) cat "$FAKE_REGISTRY/$tag/index.json" ;;
   *) echo "Name: $ref" ;;
 esac
@@ -60,11 +69,11 @@ async function commit(files: Record<string, string>, message: string): Promise<s
 /** What `latest` and the X.Y.Z tag read as on the stand-in registry. */
 async function publish(tag: string, labels: Record<string, string>, annotations?: Record<string, string>) {
   await mkdir(join(registry, tag), { recursive: true })
+  const index = JSON.stringify({ mediaType: 'application/vnd.oci.image.index.v1+json', manifests: [], annotations })
+  const digest = createHash('sha256').update(`${tag}\n${JSON.stringify(labels)}\n${index}`).digest('hex')
   await writeFile(join(registry, tag, 'labels.json'), JSON.stringify(labels))
-  await writeFile(
-    join(registry, tag, 'index.json'),
-    JSON.stringify({ mediaType: 'application/vnd.oci.image.index.v1+json', manifests: [], annotations }),
-  )
+  await writeFile(join(registry, tag, 'index.json'), index)
+  await writeFile(join(registry, tag, 'digest'), `sha256:${digest}`)
 }
 
 function plan() {
@@ -100,7 +109,6 @@ beforeEach(async () => {
   release = await commit(
     {
       Dockerfile: dockerfile(`node:22-bookworm-slim@${OLD}`),
-      '.trivyignore': '# none\n',
       'package.json': JSON.stringify({ version: '0.4.0' }),
       'worker.txt': 'as released\n',
     },
@@ -165,14 +173,27 @@ describe('rebuild plan (real git, stand-in registry)', () => {
   })
 
   it('reads the annotation before the tag\'s Dockerfile', async () => {
-    // latest was rebuilt on NEW once; main has moved on to NEWER since.
+    // latest was rebuilt on NEW once, and main has gone back to the released
+    // base. The tag's Dockerfile alone would call latest current.
+    await publish(
+      'latest',
+      { 'org.opencontainers.image.version': '0.4.0', 'org.opencontainers.image.revision': release },
+      { 'org.opencontainers.image.base.digest': NEW },
+    )
+    await commit({ Dockerfile: dockerfile(`node:22-bookworm-slim@${OLD}`) }, 'base reverted')
+    const { status, out } = plan()
+    expect(status).toBe(0)
+    expect(out.push).toBe('true')
+    expect(out['base-digest']).toBe(OLD)
+  })
+
+  it('moves on from a rebuilt latest when main pins a newer base still', async () => {
     await publish(
       'latest',
       { 'org.opencontainers.image.version': '0.4.0', 'org.opencontainers.image.revision': release },
       { 'org.opencontainers.image.base.digest': NEW },
     )
     await commit({ Dockerfile: dockerfile(`node:22-bookworm-slim@${NEWER}`) }, 'another base update')
-    git('update-ref', 'refs/remotes/origin/main', 'HEAD')
     const { status, out } = plan()
     expect(status).toBe(0)
     expect(out['base-digest']).toBe(NEWER)
@@ -211,6 +232,16 @@ describe('rebuild plan (real git, stand-in registry)', () => {
       /says 0\.4\.0, and .*:0\.4\.0 does not exist/,
     ],
     [
+      'the X.Y.Z image cannot be read',
+      () => writeFile(join(registry, '0.4.0', 'unavailable'), ''),
+      /could not read .*:0\.4\.0: .*503 Service Unavailable/,
+    ],
+    [
+      'latest cannot be read',
+      () => rm(join(registry, 'latest'), { recursive: true }),
+      /could not read .*:latest: ERROR: .*:latest: not found/,
+    ],
+    [
       'there is no git tag for that version',
       async () => {
         git('tag', '-d', 'v0.4.0')
@@ -233,23 +264,6 @@ describe('rebuild plan (real git, stand-in registry)', () => {
     expect(out.push).toBeUndefined()
     expect(stderr).toMatch(message)
     expect(existsSync(tree)).toBe(false)
-  })
-
-  it('refuses a release tree with no .trivyignore for the scan', async () => {
-    git('tag', '-d', 'v0.4.0')
-    git('checkout', '-q', release)
-    git('rm', '-q', '.trivyignore')
-    git('commit', '-q', '-m', 'release 0.4.0 without an ignore file')
-    const commitWithout = git('rev-parse', 'HEAD')
-    git('tag', 'v0.4.0')
-    git('checkout', '-q', 'main')
-    git('merge', '-q', '--no-edit', '-s', 'ours', commitWithout)
-    git('update-ref', 'refs/remotes/origin/main', 'HEAD')
-    const labels = { 'org.opencontainers.image.version': '0.4.0', 'org.opencontainers.image.revision': commitWithout }
-    await publish('latest', labels)
-    const { status, stderr } = plan()
-    expect(status).toBe(1)
-    expect(stderr).toMatch(/v0\.4\.0 has no \.trivyignore, which the scan reads/)
   })
 
   it('refuses a release tag that is not on main', async () => {

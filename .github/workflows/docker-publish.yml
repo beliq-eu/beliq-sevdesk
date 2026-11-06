@@ -1,18 +1,19 @@
 name: Docker
 
-# Two paths build and push the worker image to GHCR.
+# Two jobs build and push the worker image to GHCR.
 #
-# The release path runs on a version tag (the same v*.*.* tags that publish to
-# npm), or on a dispatch from such a tag. It pushes X.Y.Z, X.Y, latest and
+# `release` runs on a version tag (the same v*.*.* tags that publish to npm),
+# or on a dispatch from such a tag. It pushes X.Y.Z, X.Y, latest and
 # sha-<short>.
 #
-# The rebuild path runs on a push to main that changes the Dockerfile, which a
-# Renovate base update does, or on a dispatch from main with `rebuild` set. It
-# takes the release `latest` carries, builds that release's tagged tree on the
-# base digest main's Dockerfile pins, and pushes X.Y and latest only. X.Y.Z,
-# sha-<short> and every older minor keep the bytes they were released with. It
-# pushes nothing when `latest` is on that base already. scripts/rebuild-plan.sh
-# makes that call and says what it refuses.
+# `rebuild` runs on a push to main that changes the Dockerfile, which a
+# Renovate base update does, on a dispatch from main with `rebuild` set, and
+# after every release. It takes the release `latest` carries, builds that
+# release's tagged tree on the base digest main's Dockerfile pins, and pushes
+# X.Y and latest only. X.Y.Z, sha-<short> and every older minor keep the bytes
+# they were released with. It pushes nothing when `latest` is on that base
+# already, which after a release from main's tip is the usual case.
+# scripts/rebuild-plan.sh makes that call and says what it refuses.
 #
 # The image carries only the compiled worker plus @beliq/sdk from the public
 # registry; no private beliq source is in the build context (see Dockerfile).
@@ -20,7 +21,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
-    # Path filters are not evaluated for tag pushes, so tags still run.
+    # Path filters are not evaluated for tag pushes, so every tag still runs.
     branches:
       - main
     paths:
@@ -28,55 +29,46 @@ on:
   workflow_dispatch:
     inputs:
       rebuild:
-        description: 'Rebuild the release latest carries on the base main pins (from main only)'
+        description: 'Only rebuild the release latest carries on the base main pins (from main)'
         type: boolean
         default: false
 
 # One run at a time, never cancelled midway: two runs at once would push latest
 # in either order. GitHub keeps one waiting run per group, so a newer run of
-# either path cancels the waiting one; re-run it.
+# either kind cancels the waiting one, a waiting release included; re-run it.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
-permissions:
-  contents: read
-  packages: write
+# Each job asks for what it needs: both push to GHCR.
+permissions: {}
 
 env:
   IMAGE: ghcr.io/beliq-eu/beliq-sevdesk
   # Built, scanned and pushed from this one list, so no platform is pushed
   # without being scanned.
   PLATFORMS: linux/amd64,linux/arm64
+  # Trivy runs from its container image, pinned by digest like the
+  # Dockerfile's bases; bump the tag and the digest together, by hand.
+  TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.71.1@sha256:53570e6911c2361ebe7995228088cf83a6b9b73e7f3cdca44bd8f8f425e80fa7
 
 jobs:
-  publish:
+  release:
+    if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && !inputs.rebuild)
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # the guards need main's history, the rebuild its tags
-
-      - name: Pick the path
-        id: path
-        env:
-          EVENT: ${{ github.event_name }}
-          REBUILD: ${{ inputs.rebuild }}
-        run: |
-          case "$EVENT:$GITHUB_REF_TYPE" in
-            push:tag) path=release ;;
-            push:branch) path=rebuild ;;
-            workflow_dispatch:*) if [ "$REBUILD" = true ]; then path=rebuild; else path=release; fi ;;
-            *) echo "::error::no path for $EVENT on $GITHUB_REF"; exit 1 ;;
-          esac
-          echo "path=$path" >> "$GITHUB_OUTPUT"
+          fetch-depth: 0 # the guard below needs main's history
 
       # workflow_dispatch offers every branch, and a tag can point at any commit.
       # This stops a release from the wrong place by mistake. It is no defence
       # against an edit to this file: a tag runs the workflow as of its commit.
       - name: Release only from a vX.Y.Z tag on main
-        if: steps.path.outputs.path == 'release'
         run: |
           if ! [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::a release runs from a vX.Y.Z tag, not from $GITHUB_REF"
@@ -87,40 +79,96 @@ jobs:
             exit 1
           fi
 
-      # The rebuild reads main's Dockerfile, so a dispatch from another branch
-      # would splice in a base nobody merged.
-      - name: Rebuild only from main
-        if: steps.path.outputs.path == 'rebuild'
-        run: |
-          if [ "$GITHUB_REF" != refs/heads/main ]; then
-            echo "::error::a rebuild runs from main, not from $GITHUB_REF"
-            exit 1
-          fi
-
       # Gate the image on the same checks as CI, so a tag whose tests fail never
-      # produces a published image. The rebuild builds a tree these checks
-      # passed on at its release.
+      # produces a published image.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: steps.path.outputs.path == 'release'
         with:
           node-version: '22'
           # No dependency cache in a publishing job: a poisoned cache would ship.
           package-manager-cache: false
       - name: Install dependencies
-        if: steps.path.outputs.path == 'release'
         run: npm ci
       - name: Lint
-        if: steps.path.outputs.path == 'release'
         run: npm run lint
       - name: Typecheck
-        if: steps.path.outputs.path == 'release'
         run: npm run typecheck
       - name: Test
-        if: steps.path.outputs.path == 'release'
         run: npm test
       - name: Em-dash scrub check
-        if: steps.path.outputs.path == 'release'
         run: npm run scrub:check
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+
+      - name: package.json version matches the tag
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          have="$(node -p "require('./package.json').version")"
+          test "$want" = "$have" || {
+            echo "tag says $want, package.json says $have"
+            exit 1
+          }
+
+      - name: Build and scan each platform for fixable CRITICAL vulnerabilities
+        run: scripts/scan-image.sh "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/.trivyignore"
+
+      # Rebuilds from the build cache of the scan's builds, so the layers it
+      # pushes are the ones scanned. Keep its build inputs equal to theirs.
+      - name: Build and push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: ${{ env.PLATFORMS }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  rebuild:
+    needs: release
+    # After a release that pushed, or where no release ran. A failed or
+    # cancelled release rebuilds nothing.
+    if: ${{ !cancelled() && (needs.release.result == 'success' || needs.release.result == 'skipped') }}
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # The plan reads main's Dockerfile, so a dispatch from another branch
+      # would splice in a base nobody merged.
+      - name: Rebuild only from main
+        env:
+          EVENT: ${{ github.event_name }}
+          REBUILD: ${{ inputs.rebuild }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ] && [ "$REBUILD" = true ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::a rebuild runs from main, not from $GITHUB_REF"
+            exit 1
+          fi
+
+      # main, also after a release: its Dockerfile names the base, its
+      # .trivyignore holds the scan's verdicts, and its tags hold the release.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
 
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -131,44 +179,26 @@ jobs:
 
       - name: Plan the rebuild
         id: plan
-        if: steps.path.outputs.path == 'rebuild'
         run: scripts/rebuild-plan.sh "$RUNNER_TEMP/release" >> "$GITHUB_OUTPUT"
 
-      # From here on a step runs when there is an image to build: always on the
-      # release path, and on the rebuild path when the plan says push.
-      - name: Decide whether to build
-        id: build
-        env:
-          PATH_TAKEN: ${{ steps.path.outputs.path }}
-          PLAN_PUSH: ${{ steps.plan.outputs.push }}
-          PLAN_CONTEXT: ${{ steps.plan.outputs.context }}
-        run: |
-          if [ "$PATH_TAKEN" = release ] || [ "$PLAN_PUSH" = true ]; then
-            echo "go=true" >> "$GITHUB_OUTPUT"
-          fi
-          echo "context=${PLAN_CONTEXT:-$GITHUB_WORKSPACE}" >> "$GITHUB_OUTPUT"
-
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-        if: steps.build.outputs.go == 'true'
+        if: steps.plan.outputs.push == 'true'
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-        if: steps.build.outputs.go == 'true'
+        if: steps.plan.outputs.push == 'true'
 
-      - name: Docker metadata
-        id: meta
-        if: steps.path.outputs.path == 'release'
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short
+      # The verdicts are main's: a CRITICAL the new base brings is judged
+      # where the verdicts land, not in the release's tree.
+      - name: Build and scan each platform for fixable CRITICAL vulnerabilities
+        if: steps.plan.outputs.push == 'true'
+        env:
+          BUILD_CONTEXT: ${{ steps.plan.outputs.context }}
+        run: scripts/scan-image.sh "$BUILD_CONTEXT" "$GITHUB_WORKSPACE/.trivyignore"
 
       # The labels and index annotations name the release (its version and
       # commit) and the base the rebuild ran on. The plan reads that base back
       # from the annotation on the next run.
-      - name: Docker metadata for the rebuild
-        id: rebuild-meta
+      - name: Docker metadata
+        id: meta
         if: steps.plan.outputs.push == 'true'
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         env:
@@ -190,91 +220,35 @@ jobs:
             org.opencontainers.image.base.name=${{ steps.plan.outputs.base-name }}
             org.opencontainers.image.base.digest=${{ steps.plan.outputs.base-digest }}
 
-      - name: package.json version matches the tag
-        if: steps.path.outputs.path == 'release'
-        run: |
-          want="${GITHUB_REF_NAME#v}"
-          have="$(node -p "require('./package.json').version")"
-          test "$want" = "$have" || {
-            echo "tag says $want, package.json says $have"
-            exit 1
-          }
-
-      # A pushed tag cannot be recalled from the hosts that pulled it, so each
-      # platform is built and scanned before anything is pushed. Trivy reads an
-      # OCI layout directory, not an OCI tarball, hence tar=false. No
-      # attestations here, so each layout holds the one image the scan reads.
-      - name: Build each platform for the scan
-        if: steps.build.outputs.go == 'true'
-        env:
-          BUILD_CONTEXT: ${{ steps.build.outputs.context }}
-        run: |
-          for platform in ${PLATFORMS//,/ }; do
-            docker buildx build --platform "$platform" \
-              --provenance=false --sbom=false \
-              --output "type=oci,tar=false,dest=$RUNNER_TEMP/scan/${platform//\//-}" "$BUILD_CONTEXT"
-          done
-
-      # Fails on a CRITICAL vulnerability that has a fixed version and that
-      # .trivyignore does not name. One with no fixed version does not block:
-      # no rebuild could clear it. Trivy reads the image's Debian packages and
-      # its npm packages; it reports nothing for the node binary the base
-      # installs, so a CVE in Node.js itself does not block here. Every
-      # platform is scanned before the step fails, so the log lists every
-      # finding. Findings exit 3, which reads apart from a Trivy error (exit 1).
-      # Trivy runs from its container image, pinned by digest like the
-      # Dockerfile's bases; bump the tag and the digest together, by hand. The
-      # ignore file is the built tree's own: on the rebuild path, the release's.
-      - name: Scan each platform for fixable CRITICAL vulnerabilities
-        if: steps.build.outputs.go == 'true'
-        env:
-          TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.71.1@sha256:53570e6911c2361ebe7995228088cf83a6b9b73e7f3cdca44bd8f8f425e80fa7
-          BUILD_CONTEXT: ${{ steps.build.outputs.context }}
-        run: |
-          status=0
-          for platform in ${PLATFORMS//,/ }; do
-            rc=0
-            docker run --rm \
-              -v "$RUNNER_TEMP/scan:/scan:ro" \
-              -v "$RUNNER_TEMP/trivy-cache:/root/.cache/trivy" \
-              -v "$BUILD_CONTEXT/.trivyignore:/cfg/.trivyignore:ro" \
-              "$TRIVY_IMAGE" image \
-              --input "/scan/${platform//\//-}" \
-              --severity CRITICAL \
-              --ignore-unfixed \
-              --ignorefile /cfg/.trivyignore \
-              --scanners vuln \
-              --exit-code 3 \
-              --no-progress \
-              || rc=$?
-            case $rc in
-              0) ;;
-              3) echo "::error::$platform: a fixable CRITICAL vulnerability, listed above"; status=1 ;;
-              *) echo "::error::$platform: the scan did not finish (exit $rc), so nothing was checked"; status=1 ;;
-            esac
-          done
-          exit "$status"
-
-      # Each rebuilds from the build cache of the two builds above, so the
-      # layers it pushes are the ones scanned. Keep its build inputs equal to
-      # theirs.
+      # Rebuilds from the build cache of the scan's builds, so the layers it
+      # pushes are the ones scanned. Keep its build inputs equal to theirs.
       - name: Build and push
-        if: steps.path.outputs.path == 'release'
+        if: steps.plan.outputs.push == 'true'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: .
+          context: ${{ steps.plan.outputs.context }}
           platforms: ${{ env.PLATFORMS }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
 
-      - name: Build and push the rebuild
+      # The next plan trusts these three values, so a push that lost one fails
+      # here rather than leaving the next run to rebuild for ever.
+      - name: Read back what latest carries
         if: steps.plan.outputs.push == 'true'
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: ${{ steps.build.outputs.context }}
-          platforms: ${{ env.PLATFORMS }}
-          push: true
-          tags: ${{ steps.rebuild-meta.outputs.tags }}
-          labels: ${{ steps.rebuild-meta.outputs.labels }}
-          annotations: ${{ steps.rebuild-meta.outputs.annotations }}
+        env:
+          WANT_VERSION: ${{ steps.plan.outputs.version }}
+          WANT_COMMIT: ${{ steps.plan.outputs.commit }}
+          WANT_BASE: ${{ steps.plan.outputs.base-digest }}
+        run: |
+          digest=$(docker buildx imagetools inspect "$IMAGE:latest" --format '{{ .Manifest.Digest }}')
+          labels=$(docker buildx imagetools inspect "$IMAGE@$digest" --format '{{ json (index .Image "linux/amd64").Config.Labels }}')
+          base=$(docker buildx imagetools inspect "$IMAGE@$digest" --raw | jq -r '.annotations["org.opencontainers.image.base.digest"] // ""')
+          version=$(jq -r '.["org.opencontainers.image.version"] // ""' <<<"$labels")
+          commit=$(jq -r '.["org.opencontainers.image.revision"] // ""' <<<"$labels")
+          echo "latest is $digest: version $version, commit $commit, base $base"
+          if [ "$version" != "$WANT_VERSION" ] || [ "$commit" != "$WANT_COMMIT" ] || [ "$base" != "$WANT_BASE" ]; then
+            echo "::error::latest carries version '$version', commit '$commit', base '$base'; the rebuild pushed $WANT_VERSION, $WANT_COMMIT, $WANT_BASE"
+            exit 1
+          fi
