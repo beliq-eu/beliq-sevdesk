@@ -314,7 +314,6 @@ npm run build
 npm run typecheck     # src and tests
 npm run lint          # ESLint with type information, whole repository
 npm test              # unit tests, no network
-npm run scrub:check   # no em-dash
 
 # build the container image locally:
 docker build -t beliq-sevdesk .

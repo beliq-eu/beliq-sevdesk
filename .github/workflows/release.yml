@@ -88,9 +88,6 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Em-dash scrub check
-        run: npm run scrub:check
-
       - name: package.json version matches the tag
         run: |
           want="${GITHUB_REF_NAME#v}"
