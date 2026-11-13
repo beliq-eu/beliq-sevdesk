@@ -27,6 +27,13 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run scrub:check
+      - name: CHANGELOG.md has a heading for the package.json version
+        run: |
+          v="$(node -p "require('./package.json').version")"
+          grep -qE "^## ${v//./\\.} - [0-9]{4}-[0-9]{2}-[0-9]{2}\$" CHANGELOG.md || {
+            echo "::error::CHANGELOG.md has no '## $v - <date>' heading"
+            exit 1
+          }
 
   # test:integration walks the real pipeline read-only (--once --dry-run): it
   # lists every Open sevDesk invoice, pulls each one's XML and validates it. It
