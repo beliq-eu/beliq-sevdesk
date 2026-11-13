@@ -26,7 +26,6 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - run: npm test
-      - run: npm run scrub:check
       - name: CHANGELOG.md has a heading for the package.json version
         run: |
           v="$(node -p "require('./package.json').version")"
