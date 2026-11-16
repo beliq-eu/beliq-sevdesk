@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { ValidationResult } from '@beliq/sdk'
+import { retryClass, type ValidationResult } from '@beliq/sdk'
 import { checkDepth, franceBlockLines, franceBlockingRuleIds } from '@beliq/sdk/helpers'
 import type { Config } from './config.js'
 import { isDocumentRefusal, type BeliqClient } from './beliq.js'
@@ -36,7 +36,10 @@ export interface WorkerDeps {
   sleep?: (ms: number) => Promise<void>
   /** Injectable fetch for the notify webhook (tests). Defaults to global fetch. */
   fetch?: typeof fetch
-  /** Aborted on SIGTERM / SIGINT: finish the invoice in hand, save the state, return. */
+  /**
+   * Aborted on SIGTERM / SIGINT: end the beliq call in hand, even one waiting
+   * to retry an outage, leave its invoice for the next run, save the state, return.
+   */
   stop?: AbortSignal
 }
 
@@ -123,7 +126,7 @@ async function processInvoice(inv: SevDeskInvoice, config: Config, deps: WorkerD
 
   let passed: boolean
   try {
-    passed = recordVerdict(inv, await deps.beliq.validate(xml, {}), deps.log)
+    passed = recordVerdict(inv, await deps.beliq.validate(xml, { signal: deps.stop }), deps.log)
   } catch (err) {
     if (!isDocumentRefusal(err)) throw err
     deps.log.error('validate.refused', {
@@ -143,6 +146,7 @@ async function processInvoice(inv: SevDeskInvoice, config: Config, deps: WorkerD
       result = await deps.beliq.convert(xml, {
         targetFormat: target,
         targetProfile: PROFILED_TARGETS.has(target) ? config.targetProfile : undefined,
+        signal: deps.stop,
       })
     } catch (err) {
       if (!isDocumentRefusal(err)) throw err
@@ -225,10 +229,18 @@ export async function pollOnce(config: Config, deps: WorkerDeps): Promise<PollRe
       break
     }
     let result: InvoiceResult
+    let outage = false
     try {
       result = await processInvoice(inv, config, deps)
     } catch (err) {
+      if (deps.stop?.aborted) {
+        deps.log.info('poll.stopped', { unprocessed: fresh.length - outcomes.length })
+        break
+      }
       result = { classification: 'error', final: false }
+      // The client retried this outage for its whole budget, and every invoice
+      // after it would wait as long again for the same answer.
+      outage = retryClass(err) === 'budget'
       deps.log.error('invoice.error', {
         id: inv.id,
         number: inv.invoiceNumber,
@@ -238,6 +250,10 @@ export async function pollOnce(config: Config, deps: WorkerDeps): Promise<PollRe
     counts[result.classification]++
     outcomes.push({ id: inv.id, invoiceNumber: inv.invoiceNumber, classification: result.classification })
     if (result.final) processed.add(inv.id)
+    if (outage) {
+      deps.log.error('poll.outage', { unprocessed: fresh.length - outcomes.length })
+      break
+    }
   }
 
   if (!config.dryRun && (processed.size > state.processedIds.size || legacyMark !== undefined)) {

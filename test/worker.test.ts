@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Config } from '../src/config.js'
-import type { ValidationResult } from '@beliq/sdk'
+import { BeliqApiError, type ValidationResult } from '@beliq/sdk'
 import type { SevDesk } from '../src/sevdesk.js'
 import { SevDeskClient } from '../src/sevdesk.js'
 import { pollOnce, runWorker } from '../src/worker.js'
@@ -506,10 +506,10 @@ describe('runWorker as a daemon', () => {
     expect(sd.listCalls).toBe(1)
   })
 
-  it('told to stop mid-poll, finishes the invoice in hand, saves it and leaves the rest', async () => {
+  it('told to stop mid-poll, ends the beliq call in hand and leaves that invoice and the rest', async () => {
     const stop = new AbortController()
     const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }] })
-    const { client } = fakeBeliq({
+    const { client, calls } = fakeBeliq({
       validate: () => {
         stop.abort()
         return validResult()
@@ -521,10 +521,50 @@ describe('runWorker as a daemon', () => {
 
     expect(code).toBe(EXIT.OK)
     expect(sd.xmlCalls).toEqual(['10'])
-    expect(await outFiles()).toEqual(['10-ubl.xml'])
-    expect((await readState()).processedIds).toEqual(['10'])
-    expect(eventsNamed('poll.stopped').map((e) => e.fields)).toEqual([{ unprocessed: 1 }])
-    expect(summaries).toEqual(['processed 1 invoice(s): 1 valid, 0 invalid, 0 error, 0 skipped'])
+    expect(calls.map((c) => c.method)).toEqual(['validate'])
+    expect(await outFiles()).toEqual([])
+    expect(eventsNamed('invoice.error')).toEqual([])
+    expect(eventsNamed('poll.stopped').map((e) => e.fields)).toEqual([{ unprocessed: 2 }])
+    expect(summaries).toEqual(['processed 0 invoice(s): 0 valid, 0 invalid, 0 error, 0 skipped'])
+  })
+
+  it('stops the poll at an outage the client retried for its whole budget', async () => {
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }, { id: '12' }] })
+    let validates = 0
+    const { client } = fakeBeliq({
+      validate: () => {
+        validates++
+        throw new BeliqApiError('database unavailable', { status: 503, code: 'DATABASE_UNAVAILABLE', retryAfterSeconds: 30 })
+      },
+    })
+    const { log, eventsNamed, summaries } = recordingLogger()
+
+    const { counts } = await pollOnce(baseConfig(), { sevdesk: sd, beliq: client, log, now: () => FIXED_NOW })
+
+    expect(validates).toBe(1)
+    expect(sd.xmlCalls).toEqual(['10'])
+    expect(counts.error).toBe(1)
+    expect(eventsNamed('poll.outage').map((e) => e.fields)).toEqual([{ unprocessed: 2 }])
+    expect(summaries).toEqual(['processed 1 invoice(s): 0 valid, 0 invalid, 1 error, 0 skipped'])
+  })
+
+  it('keeps going after a failure the client retried by count', async () => {
+    const sd = fakeSevdesk({ invoices: [{ id: '10' }, { id: '11' }] })
+    const { client } = fakeBeliq({
+      validate: (doc) => {
+        if (new TextDecoder().decode(doc).includes('"10"')) {
+          throw new BeliqApiError('engine unavailable', { status: 503, code: 'ENGINE_UNAVAILABLE' })
+        }
+        return validResult()
+      },
+    })
+    const { log, eventsNamed } = recordingLogger()
+
+    const { counts } = await pollOnce(baseConfig(), { sevdesk: sd, beliq: client, log, now: () => FIXED_NOW })
+
+    expect(sd.xmlCalls).toEqual(['10', '11'])
+    expect(counts).toMatchObject({ error: 1, valid: 1 })
+    expect(eventsNamed('poll.outage')).toEqual([])
   })
 })
 

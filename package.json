@@ -57,7 +57,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@beliq/sdk": "^0.6.0"
+    "@beliq/sdk": "^0.7.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
