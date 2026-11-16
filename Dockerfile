@@ -6,7 +6,7 @@
 # private beliq source enters the image. All validation/conversion logic runs on
 # the beliq API over HTTPS and is never bundled here.
 # =============================================================================
-FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS builder
+FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS builder
 
 WORKDIR /build
 
@@ -24,7 +24,7 @@ RUN npm run build \
 # =============================================================================
 # Runtime
 # =============================================================================
-FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS runner
+FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS runner
 
 # The npm CLI the base ships is deleted rather than upgraded: it carries tar,
 # pacote, sigstore, brace-expansion, ip-address and picomatch advisories (all 11
