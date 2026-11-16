@@ -269,7 +269,7 @@ host can read it in the process list.
 | `SEVDESK_NOTIFY_WEBHOOK` | `--notify-webhook` | (none) | POST a JSON poll report here. Empty = no notifications. |
 | `SEVDESK_NOTIFY_ON` | | `failure` | `failure` (only on a failed invoice) or `always` (every poll). |
 | `SEVDESK_BASE_URL` | | `https://my.sevdesk.de/api/v1` | Override for a mock or a future version. |
-| `BELIQ_BASE_URL` | | `https://api.beliq.eu` | Override for a self-hosted beliq. |
+| `BELIQ_BASE_URL` | | `https://api.beliq.eu` | The base URL the worker sends its beliq API requests to. |
 | `BELIQ_AUTH` | | `header` | How the beliq key is sent: `header` (X-API-Key) or `bearer`. |
 
 Allowed target formats: `cii`, `ubl`, `zugferd`, `facturx`, `xrechnung`,
