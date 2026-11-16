@@ -87,13 +87,16 @@ export interface RecordedCall {
 export function fakeBeliq(opts: FakeBeliqOptions = {}): { client: BeliqClient; calls: RecordedCall[] } {
   const calls: RecordedCall[] = []
   const client: BeliqClient = {
+    // As the real client does, a call whose signal is already aborted throws.
     validate: async (doc, options) => {
+      options?.signal?.throwIfAborted()
       const bytes = doc as Uint8Array
       calls.push({ method: 'validate', doc: dec.decode(bytes), options })
       if (opts.throwValidateFor?.(bytes)) throw new Error('validate boom')
       return opts.validate ? opts.validate(bytes) : validResult()
     },
     convert: async (doc, options) => {
+      options.signal?.throwIfAborted()
       const bytes = doc as Uint8Array
       calls.push({ method: 'convert', doc: dec.decode(bytes), options })
       return opts.convert

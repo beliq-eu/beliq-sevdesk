@@ -14,7 +14,7 @@ import type { Logger } from './log.js'
  * real sevDesk + beliq clients, run the worker, and map every error class to its
  * exit code (see EXIT). Pure in its logger + env seams so it can be driven from a
  * test without touching real streams. Returns the process exit code. Aborting
- * `stop` ends the worker after the invoice in hand.
+ * `stop` ends the worker: a beliq call in hand ends at once, and its invoice waits for the next run.
  */
 export async function main(
   argv: string[],
