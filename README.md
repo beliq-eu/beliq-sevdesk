@@ -33,7 +33,7 @@ npm install -g beliq-sevdesk
 npx beliq-sevdesk --once
 ```
 
-Requires Node.js >= 22.
+Requires Node.js >= 24.
 
 ## Quick start
 
