@@ -13,14 +13,14 @@
       "allowedVersions": "<27.0.0"
     },
     {
-      "description": "`@types/node` tracks this repo's engines floor, `node >=22` in package.json, so a major past 22 would type development against Node APIs the package does not promise to its users. Raise it together with engines.node. The floor is a per-repo fact, so this stays out of the shared preset.",
+      "description": "`@types/node` tracks this repo's engines floor, `node >=24` in package.json, so a major past 24 would type development against Node APIs the package does not promise to its users. Raise it together with engines.node. The floor is a per-repo fact, so this stays out of the shared preset.",
       "matchPackageNames": [
         "@types/node"
       ],
-      "allowedVersions": "<23.0.0"
+      "allowedVersions": "<25.0.0"
     },
     {
-      "description": "vitest stays on 4 for now. The hold was added because vitest 5 requires `@types/node ^22.0.0 || >=24.0.0`, and this repo pinned `@types/node ^20` to track a Node 20 engines floor. The floor is now `node >=22` with `@types/node ^22`, so that reason is gone. Take vitest 5 as its own change, with its own CI run, and remove this rule in it.",
+      "description": "vitest stays on 4 for now. The hold was added because vitest 5 requires `@types/node ^22.0.0 || >=24.0.0`, and this repo pinned `@types/node ^20` to track a Node 20 engines floor. The floor is now `node >=24` with `@types/node ^24`, so that reason is gone. Take vitest 5 as its own change, with its own CI run, and remove this rule in it.",
       "matchPackageNames": [
         "vitest",
         "@vitest/**"
