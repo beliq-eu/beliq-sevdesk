@@ -5,7 +5,22 @@
   ],
   "packageRules": [
     {
-      "description": "vitest 5 drops Node 20 from its type peer: vitest 4.1.11 peerOptional-requires `@types/node ^20.0.0 || ^22.0.0 || >=24.0.0`, vitest 5.0.0 requires `^22.0.0 || >=24.0.0`. This repo pins `@types/node ^20.14.0` to track its engines floor, so npm cannot resolve and the pull request can never go green. Raising the pin to ^20.19.0 does not help: that satisfies vite 8, which is the conflict npm prints first, but not vitest 5 itself, which is the one that actually blocks. The only pin vitest 5 accepts is ^22 or >=24, and that means raising the engines floor off Node 20 first. Lift this together with engines.node and @types/node, not on its own.",
+      "description": "Node is capped below 27 in the workflows. CI runs Node 26, and the `node-version` matrix also tests the engines floor in package.json. Node 27 is not an LTS release, so the next move is to 28, in every beliq repository at once rather than in this one alone. The github-actions manager reads setup-node's `node-version:` input as depName `node` with packageName `actions/node-versions`, and `matchPackageNames` matches the packageName, so `actions/node-versions` is the name that holds the `node-version:` lines.",
+      "matchPackageNames": [
+        "node",
+        "actions/node-versions"
+      ],
+      "allowedVersions": "<27.0.0"
+    },
+    {
+      "description": "`@types/node` tracks this repo's engines floor, `node >=22` in package.json, so a major past 22 would type development against Node APIs the package does not promise to its users. Raise it together with engines.node. The floor is a per-repo fact, so this stays out of the shared preset.",
+      "matchPackageNames": [
+        "@types/node"
+      ],
+      "allowedVersions": "<23.0.0"
+    },
+    {
+      "description": "vitest stays on 4 for now. The hold was added because vitest 5 requires `@types/node ^22.0.0 || >=24.0.0`, and this repo pinned `@types/node ^20` to track a Node 20 engines floor. The floor is now `node >=22` with `@types/node ^22`, so that reason is gone. Take vitest 5 as its own change, with its own CI run, and remove this rule in it.",
       "matchPackageNames": [
         "vitest",
         "@vitest/**"

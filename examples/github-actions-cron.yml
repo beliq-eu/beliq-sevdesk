@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '26'
 
       # Carry the state file between runs so invoices are not reprocessed
       # (and failures are not re-notified) every time. The run-id key forces a
