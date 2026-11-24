@@ -5,6 +5,15 @@ breaking change; the rest of its changes are in the git history between the
 version tags (https://github.com/beliq-eu/beliq-sevdesk/tags). 0.1.0 is on npm
 without a tag. Dates are the npm publish date, in UTC.
 
+## 0.6.0 - 2026-11-24
+
+- Breaking: the worker needs Node.js 22 or later (`engines.node` `>=22`). Before,
+  it declared `>=20.15`. Node 20 reached end of life on 2026-04-30. CI tests
+  Node 22 and Node 26.
+- The container image runs Node 26 (`node:26-bookworm-slim`, Node 26.13.1).
+  Before, it ran Node 22. Nothing changes in how the image is run.
+- The image is built with `@beliq/sdk` 0.7.6. Before, it was 0.7.3.
+
 ## 0.5.0 - 2026-11-16
 
 - When beliq is unavailable (a `503` `DATABASE_UNAVAILABLE`, a `502` or `503`
