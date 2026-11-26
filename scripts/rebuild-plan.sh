@@ -6,7 +6,9 @@
 # was built on, and the base main's Dockerfile pins. When the two bases differ,
 # it checks the release's vX.Y.Z tree out into <dir> as tagged, writes main's
 # base digest into its FROM lines and nothing else, and prints push=true with
-# what the build needs. When they are the same, it prints push=false.
+# what the build needs. When they are the same, it prints push=false. It fails
+# when main's base names another tag, unless main's package.json is at a
+# release `latest` does not carry yet; then it prints push=false.
 #
 # Only the last FROM line counts as the base: it is the stage the image ships.
 # The builder stage's layers stay behind, though the splice moves its digest
@@ -73,10 +75,21 @@ for ref in "${main_from[@]}"; do
 done
 
 # Only the digest moves. A new tag or major is a release's to ship.
+# The release pull request that moves the tag also moves package.json, and its
+# merge push runs this before the release has pushed latest: the tag's run, held
+# behind this one, ships the new base. Only with no release on main is it a
+# change nobody ships.
 main_names=$(printf '%s\n' "${main_from[@]%%@*}")
 tag_names=$(printf '%s\n' "${tag_from[@]%%@*}")
-[[ $main_names == "$tag_names" ]] ||
+if [[ $main_names != "$tag_names" ]]; then
+  main_version=$(jq -r .version package.json)
+  if [[ $main_version != "$version" ]]; then
+    echo "::notice::main's FROM lines name $(paste -sd' ' <<<"$main_names"), and main's package.json is at $main_version, which $image:latest ($version) does not carry. The release of $main_version ships that base. Nothing to push." >&2
+    echo "push=false"
+    exit 0
+  fi
   fail "main's FROM lines name $(paste -sd' ' <<<"$main_names"), and v$version's name $(paste -sd' ' <<<"$tag_names"). A rebuild changes only the digest; cut a release for this."
+fi
 
 base_ref="${main_from[-1]}"
 base_name=$(qualified "${base_ref%%@*}")

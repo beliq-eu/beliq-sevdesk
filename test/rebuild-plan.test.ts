@@ -206,9 +206,35 @@ describe('rebuild plan (real git, stand-in registry)', () => {
     expect(out).toEqual({ push: 'false' })
   })
 
+  it('pushes nothing when main moves the base to another tag in a release latest does not carry yet', async () => {
+    await commit(
+      {
+        Dockerfile: dockerfile(`node:24-bookworm-slim@${NEW}`),
+        'package.json': JSON.stringify({ version: '0.5.0' }),
+      },
+      'release 0.5.0 on node 24',
+    )
+    const { status, out, stderr } = plan()
+    expect(status, stderr).toBe(0)
+    expect(out).toEqual({ push: 'false' })
+    expect(stderr).toMatch(/package\.json is at 0\.5\.0, which .*:latest \(0\.4\.0\) does not carry/)
+    expect(existsSync(tree)).toBe(false)
+  })
+
+  it('still rebuilds a digest-only base change while a release waits on main', async () => {
+    // The pending-release exit is for a new tag only: a digest update keeps
+    // rebuilding the release latest carries until the next one ships.
+    await commit({ 'package.json': JSON.stringify({ version: '0.5.0' }) }, 'release 0.5.0, untagged')
+    const { status, out, stderr } = plan()
+    expect(status, stderr).toBe(0)
+    expect(out.push).toBe('true')
+    expect(out.version).toBe('0.4.0')
+    expect(out['base-digest']).toBe(NEW)
+  })
+
   it.each([
     [
-      'main moves the base to another tag',
+      'main moves the base to another tag, with no release on main',
       async () => {
         await commit({ Dockerfile: dockerfile(`node:24-bookworm-slim@${NEW}`) }, 'node 24')
       },
